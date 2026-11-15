@@ -14,37 +14,48 @@ const certCodes=['NCA-AIIO','NCP-AII','NCA-APC','NCP-ARI','NCP-AIN','NCP-AIO'];
 const LAB_TIME={aio:20,ain:15};
 let labSummary={aio:[],ain:[]};
 async function loadLabSummary(){
- if(!user||!F||!db)return;
- let aio=[],ain=[];
+ if(!user||!F||!db)return false;
+ const uid=user.uid;
+ let aio=[],ain=[],cloudOk=false;
  try{
-  const [a,b]=await Promise.all([F.getDoc(F.doc(db,'users',user.uid,'profile','progress')),F.getDoc(F.doc(db,'users',user.uid,'ain','progress'))]);
-  if(a.exists()&&Array.isArray(a.data().completed))aio=a.data().completed;
-  if(b.exists()&&Array.isArray(b.data().completed))ain=b.data().completed;
- }catch(e){console.warn('Cloud simulator progress unavailable',e)}
- // AIO simulator uses the same origin but a separate browser tab. Its state key is cf-state.
- // Only accept local state if it belongs to the signed-in Firebase user.
+  // Read the same profile and individual lab documents written by the AIO simulator.
+  const [a,b,labDocs]=await Promise.all([
+   F.getDoc(F.doc(db,'users',uid,'profile','progress')),
+   F.getDoc(F.doc(db,'users',uid,'ain','progress')),
+   F.getDocs(F.collection(db,'users',uid,'labs'))
+  ]);
+  if(a.exists()&&Array.isArray(a.data().completed))aio.push(...a.data().completed);
+  for(const doc of labDocs.docs){const r=doc.data();if(r.labId)aio.push(r.labId);else aio.push(doc.id)}
+  if(b.exists()&&Array.isArray(b.data().completed))ain.push(...b.data().completed);
+  cloudOk=true;
+ }catch(e){console.warn('Cloud simulator progress unavailable; retaining existing counts',e)}
  try{
-  const owner=localStorage.getItem('cf-cloud-owner-v10');
-  if(owner===user.uid){
+  if(localStorage.getItem('cf-cloud-owner-v10')===uid){
    const state=JSON.parse(localStorage.getItem('cf-state')||'{}');
-   if(Array.isArray(state.completed))aio=[...aio,...state.completed];
+   if(Array.isArray(state.completed))aio.push(...state.completed);
   }
  }catch(e){console.warn('AIO local progress unavailable',e)}
  try{
-  const owner=localStorage.getItem('ain-progress-owner-v7');
-  if(owner===user.uid){const local=JSON.parse(localStorage.getItem('ain-done-v3')||'[]');if(Array.isArray(local))ain=[...ain,...local]}
+  if(localStorage.getItem('ain-progress-owner-v7')===uid){
+   const local=JSON.parse(localStorage.getItem('ain-done-v3')||'[]');
+   if(Array.isArray(local))ain.push(...local);
+  }
  }catch(e){console.warn('AIN local progress unavailable',e)}
- labSummary={aio:[...new Set(aio)].slice(0,15),ain:[...new Set(ain)].slice(0,12)};
+ // Never erase an already-loaded completion summary on a transient cloud failure.
+ const nextAio=[...new Set(aio.filter(x=>typeof x==='string'))].slice(0,15);
+ const nextAin=[...new Set(ain.filter(x=>typeof x==='string'))].slice(0,12);
+ if(cloudOk||nextAio.length||nextAin.length)labSummary={aio:nextAio,ain:nextAin};
+ return cloudOk;
 }
 
 const summary=()=>{const checks=window.AcademyProgress?.get?.()||{};const completed=Object.values(checks).filter(Boolean).length;const total=Object.values(window.ACADEMY_DATA?.resources||{}).reduce((n,x)=>n+x.length,0);const certifications=(window.AcademyBadges?.getCodes?.()||[]).filter(x=>certCodes.includes(x));const aio=[...new Set(labSummary.aio)].slice(0,15),ain=[...new Set(labSummary.ain)].slice(0,12);const labCompleted=aio.length+ain.length;const studyMinutes=window.AcademyEstimates?.resourceMinutes?.(checks)||0;const labMinutes=aio.length*LAB_TIME.aio+ain.length*LAB_TIME.ain;return {completed,total,certifications,labCompleted,labMinutes,studyMinutes,estimatedMinutes:studyMinutes+labMinutes,updatedAt:new Date().toISOString()}};
-const refresh=async()=>{if(!user||!company||!isApproved())return;const token=seq;try{const [m,r]=await Promise.all([F.getDocs(F.collection(db,'companies',companyId,'members')),isAdmin()?F.getDocs(F.collection(db,'companies',companyId,'requests')):Promise.resolve(null)]);if(token!==seq)return;members=m.docs.map(d=>({uid:d.id,...d.data()})).filter(x=>x.status==='active');requests=r?r.docs.map(d=>({uid:d.id,...d.data()})):[];emit()}catch(e){notice('Unable to load team data: '+(e.code||e.message),true)}};
+const refresh=async()=>{if(!user||!company||!isApproved())return;const token=seq;try{const [m,r]=await Promise.all([F.getDocs(F.collection(db,'companies',companyId,'members')),isAdmin()?F.getDocs(F.collection(db,'companies',companyId,'requests')):Promise.resolve(null)]);if(token!==seq)return;members=m.docs.map(d=>({uid:d.id,...d.data()})).filter(x=>x.status==='active');requests=r?r.docs.map(d=>({uid:d.id,...d.data()})):[];emit();if(!active)await sync()}catch(e){notice('Unable to load team data: '+(e.code||e.message),true)}};
 async function initialize(u){const token=++seq;user=u;companyId='';company=null;member=null;request=null;members=[];requests=[];message='';loading=true;emit();if(!u){loading=false;emit();return}const email=(u.email||'').toLowerCase();const domain=email.split('@')[1]||'';if(!u.emailVerified||!domain||personalDomains.has(domain)||!domain.includes('.')){loading=false;emit();return}companyId=domain;try{const [c,m,r]=await Promise.all([F.getDoc(companyRef()),F.getDoc(memberRef(u.uid)),F.getDoc(requestRef(u.uid))]);if(token!==seq)return;company=c.exists()?c.data():null;member=m.exists()?m.data():null;request=r.exists()?r.data():null;loading=false;emit();if(isApproved()){await refresh();await loadLabSummary();await sync()}}catch(e){if(token!==seq)return;loading=false;notice('Company workspace unavailable: '+(e.code||e.message),true)}}
 async function requestAccess(){if(!user||!company||!companyId||request||isApproved())return;const email=user.email.toLowerCase();if(!email.endsWith('@'+companyId)){notice('Your verified email does not match this company domain.',true);return}try{await F.setDoc(requestRef(user.uid),{uid:user.uid,email,name:user.displayName||email,status:'pending',requestedAt:new Date().toISOString()});request={status:'pending'};notice('Request sent. Your company administrator must approve access.')}catch(e){notice('Request failed: '+(e.code||e.message),true)}}
 async function approve(uid){if(!isAdmin())return;const r=requests.find(x=>x.uid===uid);if(!r||!r.email?.toLowerCase().endsWith('@'+companyId)){notice('Cannot approve: email domain does not match company.',true);return}try{await F.setDoc(memberRef(uid),{uid,email:r.email.toLowerCase(),name:r.name||r.email,role:'member',status:'active',completed:0,total:0,certifications:[],labCompleted:0,labMinutes:0,studyMinutes:0,estimatedMinutes:0,updatedAt:new Date().toISOString()});await F.deleteDoc(requestRef(uid));notice('Employee approved.');await refresh()}catch(e){notice('Approval failed: '+(e.code||e.message),true)}}
 async function reject(uid){if(!isAdmin())return;try{await F.deleteDoc(requestRef(uid));notice('Request declined.');await refresh()}catch(e){notice('Decline failed: '+(e.code||e.message),true)}}
 async function revoke(uid){if(!isAdmin()||uid===user.uid||!confirm('Remove this member from the company team?'))return;try{await F.deleteDoc(memberRef(uid));notice('Member access revoked.');await refresh()}catch(e){notice('Removal failed: '+(e.code||e.message),true)}}
-async function sync(){if(!user||!company||!isApproved()||active)return;active=true;try{const ref=memberRef(user.uid);if(!member&&isAdmin())return;await F.updateDoc(ref,summary());member={...member,...summary()};const row=members.find(x=>x.uid===user.uid);if(row)Object.assign(row,summary());emit()}catch(e){if(e.code!=='permission-denied')notice('Team summary could not sync: '+(e.code||e.message),true)}finally{active=false}}
+async function sync(){if(!user||!company||!isApproved()||active)return;active=true;try{await loadLabSummary();const ref=memberRef(user.uid);if(!member&&isAdmin())return;await F.updateDoc(ref,summary());member={...member,...summary()};const row=members.find(x=>x.uid===user.uid);if(row)Object.assign(row,summary());emit()}catch(e){if(e.code!=='permission-denied')notice('Team summary could not sync: '+(e.code||e.message),true)}finally{active=false}}
 // V14: all calculations use approved members' existing summary fields; no new Firestore reads.
 const safeCount=n=>Math.max(0,Number.isFinite(Number(n))?Math.floor(Number(n)):0);
 const approvedBadges=m=>[...new Set((Array.isArray(m.certifications)?m.certifications:[]).filter(c=>certCodes.includes(c)))];

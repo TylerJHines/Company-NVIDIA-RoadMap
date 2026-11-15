@@ -1,5 +1,4 @@
-// Public Firebase web app configuration. Do not put service-account keys here.
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+// Firebase client configuration for the company NVIDIA roadmap project.
 export const firebaseConfig = {
   apiKey: "AIzaSyDaOjDUnUL3axBFaUwAPwHwAE6bniN85o4",
   authDomain: "company-nvidia-roadmap.firebaseapp.com",
