@@ -52,7 +52,37 @@ function terminal(){
  const panel=`<section class="terminal-panel" aria-label="Simulated command terminal"><div class="terminalbar"><span>⌘ tyler-ncp-aio@training-01</span><div class="flex"><span class="tag">${esc(state.shell==='bash'?'Linux':'BCM cmsh')}</span>${button('Clear','clearScreen()','tiny')}</div></div><div id="output" class="output" role="log" aria-live="polite">${state.history.length?state.history.map(h=>`<span class="prompt">${esc(h.prompt)}</span> ${esc(h.command)}\n${esc(h.result)}\n`).join('\n'):"Welcome to Tyler\'s NCP-AIO Practice Sim and Mock Exam.\nType hint for the next command or help for available commands.\n"}</div><form class="cmdline" onsubmit="runCommand(event)"><span class="prompt">${state.shell==='cmsh'?'cmsh>':'$'}</span><input id="command" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Terminal command" placeholder="Type command or hint…"><button class="button primary" type="submit">Run ↵</button></form><div class="terminal-shortcuts"><button onclick="quick('hint')">💡 Hint</button><button onclick="quick('help')">Help</button>${mock?.phase==='labs'?'':button('Reset cluster','resetCluster()','tiny')}</div></section>`;
  return `<div class="lab-workspace ${active?'guided':'free'}"><div class="workspace-head"><div><h1>${active?'Lab workspace':'Practice terminal'}</h1><p>${active?'Your objective and terminal stay together.':'Explore simulated Slurm, Kubernetes and BCM commands.'}</p></div>${mock?.phase==='labs'?button('Submit / skip lab','submitMockLab()','tiny'):active?button('Choose another lab','go("faults")','tiny'):button('Guided labs','go("faults")','primary')}</div><div class="workspace-grid">${current}${panel}</div></div>`
 }
-function help(){return 'Lab-specific commands are available when you start an extended guided lab, including simulated simctl training actions.\nSupported: help, clear, sinfo [-R], squeue, scontrol show node NODE, scontrol show job 1042, scontrol update NodeName=NODE State=RESUME, sbatch demo.sh, scancel JOBID, sacct, kubectl get pods|nodes, kubectl describe pod NAME, kubectl logs NAME, kubectl set image deployment/inference inference=IMAGE, kubectl apply -f demo.yaml, kubectl delete pod NAME, nvidia-smi, cmsh.\nWithin cmsh: device, list, use NODE, get PROPERTY, set image|category VALUE, commit, provision NODE (training shortcut), exit.\nTip: use the Fault Lab to inject recoverable failures.'}
+function help(){return [
+'NCP-AIO COMMAND REFERENCE (synthetic training)',
+'',
+'SLURM / SCHEDULING',
+'  sinfo [-R]                        - Node state / reasons',
+'  squeue                            - Job queue',
+'  scontrol show node NODE           - Node detail',
+'  scontrol show job 1042            - Job detail',
+'  scontrol update NodeName=NODE State=RESUME  - Resume node',
+'  sbatch demo.sh | scancel JOBID | sacct  - Jobs / accounting',
+'',
+'KUBERNETES / WORKLOADS',
+'  kubectl get pods | kubectl get nodes',
+'  kubectl describe pod NAME | kubectl logs NAME',
+'  kubectl set image deployment/inference inference=IMAGE',
+'  kubectl apply -f demo.yaml | kubectl delete pod NAME',
+'',
+'BASE COMMAND MANAGER (BCM)',
+'  cmsh                             - Enter BCM shell',
+'  device | list | use NODE | get PROPERTY',
+'  set image VALUE | set category VALUE | commit',
+'  provision NODE (training shortcut) | exit',
+'',
+'GPU / GENERAL',
+'  nvidia-smi                        - Inspect GPUs',
+'  help | clear | hint               - Training controls',
+'',
+'Extended guided labs also expose scenario-specific simctl commands.',
+'Check the active objective and scenario details before applying changes.'
+].join('\n')}
+
 function evaluate(raw){const extended=extendedEvaluate(raw);if(extended!==null)return extended;const cmd=raw.trim(),a=cmd.split(/\s+/);if(!cmd)return '';if(cmd==='help'||cmd==='?')return help();if(cmd.toLowerCase()==='hint')return terminalHint();if(cmd==='clear'){state.history=[];return 'Screen cleared.'}if(state.shell==='cmsh'){if(cmd==='exit'){state.shell='bash';state.mode='';return 'Exited cmsh.'}if(cmd==='device'){state.mode='device';return 'device mode: list, use node003, get image, set image IMAGE, set category CATEGORY, commit, provision node003'}if(!state.mode)return 'Enter device to manage devices, or exit.';if(cmd==='list')return Object.entries(state.bcm).map(([n,d])=>`${n}  image=${d.image||'(unset)'}  category=${d.category||'(unset)'}  status=${d.provisioned?'UP':'UNPROVISIONED'}`).join('\n');if(a[0]==='use'){if(!state.bcm[a[1]])return 'Unknown BCM device.';state.selected=a[1];return 'Selected '+a[1]}if(a[0]==='get'){if(!state.selected)return 'Select a device first: use node003';return `${a[1]} = ${state.staged[a[1]]??state.bcm[state.selected][a[1]]??'(unset)'}`}if(a[0]==='set'){if(!state.selected)return 'Select a device first.';if(!['image','category'].includes(a[1])||!a[2])return 'Usage: set image IMAGE or set category CATEGORY';state.staged[a[1]]=a.slice(2).join(' ');return 'Staged '+a[1]+' = '+state.staged[a[1]]+'; run commit.'}if(cmd==='commit'){if(!state.selected)return 'Select a device first.';Object.assign(state.bcm[state.selected],state.staged);state.staged={};return 'Configuration committed.'}if(a[0]==='provision'){let n=a[1]||state.selected,d=state.bcm[n];if(!d)return 'Unknown device.';if(!d.image||!d.category)return 'Cannot provision: configure image and category and commit first.';d.provisioned=true;return n+' provisioned successfully. Confirm with list.'}return 'Unsupported cmsh command. Try device, list, use, get, set, commit, provision, exit.'}
 if(cmd==='cmsh'){state.shell='cmsh';state.mode='';return 'NVIDIA Base Command Manager shell (training subset). Type device.'}
 if(a[0]==='sinfo'){if(a[1]==='-R'){const rows=Object.entries(state.nodes).filter(([,n])=>n.reason).map(([id,n])=>`${n.reason.padEnd(22)} trainer ${id}`);return rows.length?'REASON                 USER    NODELIST\n'+rows.join('\n'):'No unavailable nodes'}return 'PARTITION AVAIL NODES STATE NODELIST\ngpu*      up    2     '+Object.entries(state.nodes).map(([id,n])=>`${id}:${n.state}`).join(' ')}

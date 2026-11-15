@@ -6,7 +6,34 @@ function save(){localStorage.setItem('ain-done-v3',JSON.stringify([...completed]
 function button(t,fn,cls=''){return `<button class="button ${cls}" onclick="${esc(fn)}">${t}</button>`}
 function go(p){page=p;render()}function resetState(){return {link:{swp1:'down',swp2:'up',swp49:'up'},mtu:{swp1:9216,swp2:1500,swp49:9216},staged:{},last:'',escalated:false}}
 let net=resetState();function start(id,fromMock=false){let l=AIN_LABS.find(x=>x.id===id);if(!l)return;active={id,at:0,done:[],hintCounts:[],fromMock};net=resetState();if(id!=='cx-link')net.link.swp1='up';if(id!=='cx-mtu')net.mtu.swp2=9216;history=[];hints=0;page='terminal';render()}
-function output(cmd){let l=active&&AIN_LABS.find(x=>x.id===active.id),fault=l?.id||'',p=cmd.split(' '),port=p.find(x=>/^swp\d+$/.test(x))||'swp1';if(cmd==='help'||cmd==='?')return 'Commands: nv show interface swp1|swp2|swp49; nv show qos; nv config show; nv set interface swp1 link state up; nv set interface swp2 link mtu 9216; nv config apply; ibstat; ibv_devinfo; iblinkinfo; ibdiagnet; perfquery; mlxlink -d /dev/mst/mt4129_pciconf0 -p 1; rdma link show; ip link show; ip addr show; ip route; ethtool -S swp1|swp2|swp49; sudo vtysh -c "show bgp summary"; simctl escalate REASON; hint; clear. Use the command academy for context.';
+function output(cmd){let l=active&&AIN_LABS.find(x=>x.id===active.id),fault=l?.id||'',p=cmd.split(' '),port=p.find(x=>/^swp\d+$/.test(x))||'swp1';if(cmd==='help'||cmd==='?')return [
+'NETWORK LAB COMMAND REFERENCE (synthetic training)',
+'',
+'SPECTRUM / CUMULUS (NVUE)',
+'  nv show interface swp1 | swp2 | swp49  - Interface status',
+'  nv show qos                          - QoS / PFC inspection',
+'  nv config show                       - Staged configuration',
+'  nv set interface swp1 link state up  - Restore an interface',
+'  nv set interface swp2 link mtu 9216  - Change MTU',
+'  nv config apply                      - Apply configuration',
+'',
+'INFINIBAND / FABRIC',
+'  ibstat | ibv_devinfo | iblinkinfo     - Local adapter / links',
+'  ibdiagnet | perfquery                - Fabric / port counters',
+'  mlxlink -d /dev/mst/mt4129_pciconf0 -p 1  - Port detail',
+'',
+'LINUX / RDMA / ROUTING',
+'  rdma link show | ip link show | ip addr show | ip route',
+'  ethtool -S swp1 | swp2 | swp49       - Link statistics',
+'  sudo vtysh -c "show bgp summary"    - BGP peers',
+'',
+'TRAINING CONTROLS',
+'  simctl escalate REASON  - Record escalation',
+'  hint  - Next-step hint (penalty in mock)   clear  - Clear output',
+'  help  - Display this reference',
+'',
+'Use the Command Academy for explanations and the current lab objective for context.'
+].join('\n');
 if(cmd==='hint'){if(!active)return 'Start a guided lab first.';let step=l.steps[active.at];if(!step)return 'Lab complete';active.hintCounts[active.at]=(active.hintCounts[active.at]||0)+1;save();return 'HINT (penalty applies in mock): '+step[1]+'\nObjective: '+step[0]}
 if(cmd==='clear'){history=[];return 'Terminal cleared.'}
 if(cmd.startsWith('nv show interface ')){if(!/^swp(1|2|49)$/.test(port))return 'Error: interface not found';let st=net.link[port],mtu=net.mtu[port];return `Interface: ${port}\nAdmin state: ${st==='down'?'down':'up'}\nOper state: ${st==='down'?'down':'up'}\nMTU: ${mtu}\nSpeed: 400G\nRX errors: ${fault==='sx-fabric'&&port==='swp49'?183:0}\nTraining snapshot: ${fault==='cx-link'&&port==='swp1'?'administratively down':fault==='cx-mtu'&&port==='swp2'?'MTU below intended jumbo frame setting':'see scenario for fault context'}`}
