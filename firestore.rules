@@ -1,75 +1,299 @@
+
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    function owner(uid) { return signedIn() && request.auth.uid == uid; }
+
+    // ------------------------------------------
+    // AUTHENTICATION HELPERS
+    // ------------------------------------------
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function owner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
     function companyAdmin(companyId) {
       return signedIn() &&
-        get(/databases/$(database)/documents/companies/$(companyId)).data.adminUid == request.auth.uid;
+        exists(
+          /databases/$(database)/documents/companies/$(companyId)
+        ) &&
+        get(
+          /databases/$(database)/documents/companies/$(companyId)
+        ).data.adminUid == request.auth.uid;
     }
+
     function approvedMember(companyId) {
       return signedIn() &&
-        exists(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid)).data.status == 'active';
+        exists(
+          /databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid)
+        ) &&
+        get(
+          /databases/$(database)/documents/companies/$(companyId)/members/$(request.auth.uid)
+        ).data.status == 'active';
     }
+
+    function validCertifications(certs) {
+      return certs is list &&
+        certs.size() <= 6 &&
+        certs.hasOnly([
+          'NCA-AIIO',
+          'NCP-AII',
+          'NCA-APC',
+          'NCP-ARI',
+          'NCP-AIN',
+          'NCP-AIO'
+        ]);
+    }
+
+    function validTeamProgress(data) {
+      return data.completed is int &&
+        data.completed >= 0 &&
+        data.total is int &&
+        data.total >= 0 &&
+        data.completed <= data.total &&
+
+        validCertifications(data.certifications) &&
+
+        data.labCompleted is int &&
+        data.labCompleted >= 0 &&
+        data.labCompleted <= 27 &&
+
+        data.labMinutes is int &&
+        data.labMinutes >= 0 &&
+
+        data.studyMinutes is int &&
+        data.studyMinutes >= 0 &&
+
+        data.estimatedMinutes is int &&
+        data.estimatedMinutes ==
+          data.studyMinutes + data.labMinutes &&
+
+        data.updatedAt is string;
+    }
+
+    // ------------------------------------------
+    // PERSONAL ACADEMY PROGRESS
+    // ------------------------------------------
+
     match /users/{userId}/profile/{profileId} {
-      allow read, write: if owner(userId) && profileId == 'progress';
+      allow read, write: if owner(userId) &&
+        profileId == 'progress';
     }
+
     match /users/{userId}/academy/{docId} {
-      allow read, write: if owner(userId) && docId == 'progress';
+      allow read, write: if owner(userId) &&
+        docId == 'progress';
     }
+
+    // ------------------------------------------
+    // NCP-AIN SIMULATOR
+    // ------------------------------------------
+
     match /users/{userId}/ain/{docId} {
-      allow read, write: if owner(userId) && docId == 'progress';
+      allow read, write: if owner(userId) &&
+        docId == 'progress';
     }
+
+    // ------------------------------------------
+    // NCP-AIO COMPLETED LABS
+    // ------------------------------------------
+
     match /users/{userId}/labs/{labId} {
       allow read, write: if owner(userId);
     }
+
+    // ------------------------------------------
+    // PERSONAL MOCK EXAM RECORDS
+    // ------------------------------------------
+
     match /users/{userId}/exams/{examId} {
       allow read, write: if owner(userId);
     }
+
+    // ------------------------------------------
+    // CERTIFICATION BADGES
+    // ------------------------------------------
+
     match /users/{userId}/certifications/{certCode} {
-      allow read, write: if owner(userId) && certCode in [
-        'NCA-AIIO','NCP-AII','NCA-APC','NCP-ARI','NCP-AIN','NCP-AIO'
-      ];
+      allow read, write: if owner(userId) &&
+        certCode in [
+          'NCA-AIIO',
+          'NCP-AII',
+          'NCA-APC',
+          'NCP-ARI',
+          'NCP-AIN',
+          'NCP-AIO'
+        ];
     }
+
+    // ------------------------------------------
+    // COMPANY WORKSPACES
+    // ------------------------------------------
+
     match /companies/{companyId} {
+
+      // Signed-in users can look up a company
+      // workspace by its email domain.
       allow get: if signedIn();
+
+      // Workspaces must be provisioned by
+      // the academy owner in Firebase.
       allow list, create, update, delete: if false;
+
+      // ----------------------------------------
+      // COMPANY ACCESS REQUESTS
+      // ----------------------------------------
+
       match /requests/{uid} {
-        allow get: if owner(uid) || companyAdmin(companyId);
+
+        allow get: if owner(uid) ||
+          companyAdmin(companyId);
+
         allow list: if companyAdmin(companyId);
-        allow create: if owner(uid) && request.auth.token.email_verified == true
-          && request.resource.data.keys().hasOnly(['uid','email','name','status','requestedAt'])
-          && request.resource.data.uid == uid
-          && request.resource.data.email == request.auth.token.email
-          && request.resource.data.status == 'pending'
-          && request.resource.data.email.matches('^[^@]+@' + companyId + '$');
+
+        allow create: if owner(uid) &&
+          request.auth.token.email_verified == true &&
+
+          request.resource.data.keys().hasOnly([
+            'uid',
+            'email',
+            'name',
+            'status',
+            'requestedAt'
+          ]) &&
+
+          request.resource.data.uid == uid &&
+
+          request.resource.data.email ==
+            request.auth.token.email &&
+
+          request.resource.data.status == 'pending' &&
+
+          request.resource.data.email.matches(
+            '^[^@]+@' + companyId + '$'
+          );
+
         allow update: if false;
-        allow delete: if owner(uid) || companyAdmin(companyId);
+
+        allow delete: if owner(uid) ||
+          companyAdmin(companyId);
       }
+
+      // ----------------------------------------
+      // APPROVED COMPANY MEMBERS
+      // ----------------------------------------
+
       match /members/{uid} {
-        allow get: if owner(uid) || approvedMember(companyId) || companyAdmin(companyId);
-        allow list: if approvedMember(companyId) || companyAdmin(companyId);
-        allow create: if companyAdmin(companyId)
-          && exists(/databases/$(database)/documents/companies/$(companyId)/requests/$(uid))
-          && request.resource.data.keys().hasOnly(['uid','email','name','role','status','completed','total','certifications','updatedAt'])
-          && request.resource.data.uid == uid
-          && request.resource.data.email == get(/databases/$(database)/documents/companies/$(companyId)/requests/$(uid)).data.email
-          && request.resource.data.role == 'member'
-          && request.resource.data.status == 'active'
-          && request.resource.data.completed == 0
-          && request.resource.data.total == 0
-          && request.resource.data.certifications == [];
-        allow update: if owner(uid) && resource.data.status == 'active'
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completed','total','certifications','updatedAt'])
-          && request.resource.data.completed is int && request.resource.data.completed >= 0
-          && request.resource.data.total is int && request.resource.data.total >= 0
-          && request.resource.data.completed <= request.resource.data.total
-          && request.resource.data.certifications is list && request.resource.data.certifications.size() <= 6
-          && request.resource.data.certifications.hasOnly(['NCA-AIIO','NCP-AII','NCA-APC','NCP-ARI','NCP-AIN','NCP-AIO']);
-        allow delete: if companyAdmin(companyId) || owner(uid);
+
+        // Members can view approved coworkers
+        // within their own company workspace.
+        allow get: if owner(uid) ||
+          approvedMember(companyId) ||
+          companyAdmin(companyId);
+
+        allow list: if approvedMember(companyId) ||
+          companyAdmin(companyId);
+
+        // Company administrator approves a
+        // pending employee access request.
+        allow create: if companyAdmin(companyId) &&
+
+          exists(
+            /databases/$(database)/documents/companies/$(companyId)/requests/$(uid)
+          ) &&
+
+          request.resource.data.keys().hasOnly([
+            'uid',
+            'email',
+            'name',
+            'role',
+            'status',
+            'completed',
+            'total',
+            'certifications',
+            'labCompleted',
+            'labMinutes',
+            'studyMinutes',
+            'estimatedMinutes',
+            'updatedAt'
+          ]) &&
+
+          request.resource.data.keys().hasAll([
+            'uid',
+            'email',
+            'name',
+            'role',
+            'status',
+            'completed',
+            'total',
+            'certifications',
+            'labCompleted',
+            'labMinutes',
+            'studyMinutes',
+            'estimatedMinutes',
+            'updatedAt'
+          ]) &&
+
+          request.resource.data.uid == uid &&
+
+          request.resource.data.email ==
+            get(
+              /databases/$(database)/documents/companies/$(companyId)/requests/$(uid)
+            ).data.email &&
+
+          request.resource.data.role == 'member' &&
+
+          request.resource.data.status == 'active' &&
+
+          request.resource.data.completed == 0 &&
+          request.resource.data.total == 0 &&
+          request.resource.data.certifications == [] &&
+          request.resource.data.labCompleted == 0 &&
+          request.resource.data.labMinutes == 0 &&
+          request.resource.data.studyMinutes == 0 &&
+          request.resource.data.estimatedMinutes == 0 &&
+
+          validTeamProgress(request.resource.data);
+
+        // Employees can update only their own
+        // progress summary, not membership,
+        // company, administrator, or identity.
+        allow update: if owner(uid) &&
+
+          resource.data.status == 'active' &&
+
+          request.resource.data.diff(
+            resource.data
+          ).affectedKeys().hasOnly([
+            'completed',
+            'total',
+            'certifications',
+            'labCompleted',
+            'labMinutes',
+            'studyMinutes',
+            'estimatedMinutes',
+            'updatedAt'
+          ]) &&
+
+          validTeamProgress(request.resource.data);
+
+        // Administrator can revoke access.
+        // Employees can remove themselves.
+        allow delete: if companyAdmin(companyId) ||
+          owner(uid);
       }
     }
-    match /{document=**} { allow read, write: if false; }
+
+    // ------------------------------------------
+    // DEFAULT: DENY ALL OTHER ACCESS
+    // ------------------------------------------
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }
