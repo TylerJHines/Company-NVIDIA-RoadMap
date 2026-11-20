@@ -3,6 +3,7 @@
    Synthetic state, evidence, and validation are kept separate from checklist order. */
 'use strict';
 const NAVIAOps = (() => {
+  const ENGINE_REVISION = '2026-11-19-martin-aligned-r2';
   const GOOD_IMAGE = 'nvcr.io/nvidia/pytorch:24.08-py3';
   const BAD_IMAGE = 'nvcr.io/nvidia/pytorch:missing-release';
   const GOOD_BCM_IMAGE = 'dgx-h100-image';
@@ -84,55 +85,94 @@ const NAVIAOps = (() => {
     'ls':'ls -lh /shared/old-checkpoint.tmp'
   };
   const err=t=>'Error: '+t;
+  // Evidence is tracked separately from system recovery. All commands execute irrespective of goal order.
+  function diagnosticEvidence(s,cmd,result){
+    if(/^Error:/.test(result)||healthy(s))return false;
+    const c=cmd.replace(/\s+(?:-n|--namespace)\s+\S+/g,'').trim();
+    const read={
+      drain:/^(sinfo(?:\s|$)|scontrol show node node002|systemctl status slurmd)/,
+      image:/^kubectl (get (?:pods?|deploy(?:ment)?s?)(?:\s|$)|describe (?:pod inference|deployment inference)|rollout history deployment\/inference)/,
+      bcm:/^(cmsh -c .*device.*(?:list|show|status)|(?:list|show|status|power status)(?:\s|$))/, 
+      'slurm-resources':/^(squeue|scontrol show (?:node node002|job 104[12])|sacct)/,
+      'slurm-partition':/^(squeue|scontrol show (?:job 1042|partition)|sinfo)/,
+      'slurm-gres':/^(sinfo|scontrol show node node002|nvidia-smi|cat \/etc\/slurm\/gres.conf)/,
+      'slurm-service':/^(sinfo|scontrol show node node002|(?:ssh node002 )?(?:sudo )?systemctl status slurmd|(?:ssh node002 )?journalctl -u slurmd)/,
+      'k8s-pending':/^kubectl (get pods|describe pod inference|describe node node002|describe nodes node002)/,
+      'k8s-crash':/^kubectl (get pods|describe pod inference|logs inference)/,
+      'k8s-gpu':/^kubectl (get pods|get daemonset|describe pod inference|describe node node002|logs daemonset\/nvidia-device-plugin-daemonset)/,
+      'k8s-node':/^(kubectl (get nodes|describe node node002)|(?:ssh node002 )?(?:sudo )?systemctl status kubelet|(?:ssh node002 )?journalctl -u kubelet)/,
+      'bcm-image':/^(cmsh -c .*?(?:list|show|get)|(?:list|show|get softwareimage)(?:\s|$))/, 
+      'bcm-category':/^(cmsh -c .*?(?:list|show|get)|(?:list|show|get category)(?:\s|$))/, 
+      'gpu-xid':/^(nvidia-smi|journalctl -k|ssh node002 journalctl -k|dcgmi|nvsm show health)/,
+      'storage-full':/^(df -h|du -sh \/shared\/\*|ls -lh \/shared\/old-checkpoint.tmp)/
+    };
+    return !!(read[s.id]&&read[s.id].test(c));
+  }
+  function verificationEvidence(s,cmd,result){
+    if(/^Error:/.test(result)||!healthy(s))return false;
+    const c=cmd.replace(/\s+(?:-n|--namespace)\s+\S+/g,'').trim();
+    const read={
+      drain:/^(sinfo|scontrol show node node002)/,
+      image:/^kubectl (get pods|get deployment|describe deployment inference|rollout status deployment\/inference)/,
+      bcm:/^(cmsh -c .*?(?:status|list|show)|(?:list|status|show)(?:\s|$))/, 
+      'slurm-resources':/^(squeue|scontrol show job 1042)/,
+      'slurm-partition':/^(squeue|scontrol show job 1042)/,
+      'slurm-gres':/^(scontrol show node node002|sinfo)/,
+      'slurm-service':/^(sinfo|scontrol show node node002|(?:ssh node002 )?systemctl status slurmd)/,
+      'k8s-pending':/^kubectl (get pods|describe pod inference)/,
+      'k8s-crash':/^kubectl (get pods|describe pod inference|rollout status deployment\/inference)/,
+      'k8s-gpu':/^kubectl (get pods|describe node node002|get daemonset)/,
+      'k8s-node':/^kubectl (get nodes|describe node node002)/,
+      'bcm-image':/^(cmsh -c .*?(?:get|show|list)|(?:get softwareimage|show|list)(?:\s|$))/, 
+      'bcm-category':/^(cmsh -c .*?(?:get|show|list)|(?:get category|show|list)(?:\s|$))/, 
+      'gpu-xid':/^(sinfo -R|scontrol show node node002)/,
+      'storage-full':/^(df -h|du -sh \/shared\/\*)/
+    };
+    return !!(read[s.id]&&read[s.id].test(c));
+  }
   function run(s,raw){
-    let cmd=String(raw||'').trim().replace(/\s+/g,' ');
+    const cmd=String(raw||'').trim().replace(/\s+/g,' ');
     if(!cmd)return '';
-    if(cmd==='help'||cmd==='?'||cmd==='man')return 'NAVIA simulation command reference (not an OS shell):\n'+Object.values(docs).join('\n')+'\nUse COMMAND --help for syntax; unknown commands are not executed. Outputs are synthetic.';
-    let helpKey=cmd.match(/^([\w-]+) --help$/);
+    if(cmd==='help'||cmd==='?'||cmd==='man')return 'NAVIA simulation command reference (not a live host):\n'+Object.values(docs).join('\n')+'\nUse COMMAND --help or man COMMAND for usage. Outputs are synthetic.';
+    const helpKey=cmd.match(/^([\w-]+) --help$/);
     if(helpKey)return docs[helpKey[1]]||err('No simulated manual for '+helpKey[1]);
-    if(cmd.startsWith('man '))return docs[cmd.slice(4).split(' ')[0]]||err('Manual unavailable for command in this simulator');
-    if(cmd==='clear')return 'Terminal cleared (history remains available until reset).';
+    if(cmd.startsWith('man '))return docs[cmd.slice(4).split(' ')[0]]||err('Manual unavailable for this command');
+    if(cmd==='clear')return 'Screen cleared. Your cluster configuration is unchanged.';
+    const wasHealthy=healthy(s);
     let result;
     if(cmd.startsWith('cmsh -c ')){
       const m=cmd.match(/^cmsh -c ["'](.+)["']$/);
       if(!m)return err('cmsh -c requires a quoted command sequence');
       const session={...s,shell:'cmsh',mode:'',selected:'',staged:{}};
-      let out=[];for(const part of m[1].split(';').map(t=>t.trim()).filter(Boolean)){let r=cmsh(session,part);out.push(r);if(r.startsWith('Error:'))break}
-      s.bcm=session.bcm;result=out.some(line=>line.startsWith('Error:'))?out.filter(line=>line.startsWith('Error:')).join('\n'):out.join('\n');
-    } else if(s.shell==='cmsh'||cmd==='cmsh'){
-      if(cmd==='cmsh'&&s.shell!=='cmsh'){s.shell='cmsh';s.mode='';s.selected='';result='BCM cmsh management shell (simulation). Try device, softwareimage, category or help.'}
-      else result=cmsh(s,cmd);
-    } else result=linux(s,cmd);
+      const out=[];
+      for(const part of m[1].split(';').map(x=>x.trim()).filter(Boolean)){
+        const line=cmsh(session,part);out.push(line);
+        if(line.startsWith('Error:'))break;
+      }
+      result=out.join('\n');
+      if(!out.some(t=>t.startsWith('Error:')))s.bcm=session.bcm;
+    }else if(s.shell==='cmsh'||cmd==='cmsh'){
+      if(cmd==='cmsh'&&s.shell!=='cmsh'){
+        s.shell='cmsh';s.mode='';s.selected='';result='BCM cmsh shell (simulated). Select device, softwareimage or category; type help for usage.';
+      }else result=cmsh(s,cmd);
+    }else result=linux(s,cmd);
     if(!result.startsWith('Error:')){
       s.commandLog.push(cmd);if(s.commandLog.length>300)s.commandLog.shift();
-      const ok=healthy(s);
-      if(!ok)s.validated=false;
-      const d=defs[s.id];
-      if(d){
-        if(isDiagnosis(s,cmd)){s.seen.push('investigate');}
-        if(s.id==='image' && /^kubectl get (rs|replicasets|replicaset)(\s|$)/.test(cmd) && /-o (yaml|json)/.test(cmd))s.seen.push('image-source');
-        if(s.id==='image' && cmd.startsWith('kubectl rollout history deployment/inference'))s.seen.push('revision-source');
-        if(ok&&isVerification(s,cmd)){s.seen.push('verify');s.validated=true;}
-        if(ok)s.repaired=true;
+      if(!Array.isArray(s.seen))s.seen=[];
+      if(!wasHealthy&&diagnosticEvidence(s,cmd,result)){
+        if(!s.seen.includes('investigate'))s.seen.push('investigate');
+        s.lastEvidence=cmd;
+      }
+      const recovered=healthy(s);
+      if(!recovered){s.validated=false;s.repaired=false;}
+      else{
+        s.repaired=true;
+        if(verificationEvidence(s,cmd,result)&&wasHealthy){s.validated=true;s.lastValidation=cmd;}
       }
     }
     return result;
   }
-  function isDiagnosis(s,c){
-    const id=s.id;
-    if(['bcm','bcm-image','bcm-category'].includes(id))return /^(list|status|show|get |softwareimage|category|device|cmsh -c .*(list|show|get))/.test(c);
-    if(id.startsWith('slurm')||id==='drain'||id==='gpu-xid')return /^(sinfo|squeue|scontrol show|nvidia-smi|cat |journalctl|systemctl status|dcgmi)/.test(c);
-    if(id.startsWith('k8s')||id==='image')return /^(kubectl (get|describe|logs|rollout history)|systemctl status|journalctl)/.test(c);
-    if(id==='storage-full')return /^(df |du |ls )/.test(c);
-    return false;
-  }
-  function isVerification(s,c){
-    if(['bcm','bcm-image','bcm-category'].includes(s.id))return /^(list|status|show|get |device|cmsh -c .*(list|status|show|get))/.test(c);
-    if(['drain','slurm-resources','slurm-partition','slurm-gres','slurm-service','gpu-xid'].includes(s.id))return /^(sinfo|squeue|scontrol show|systemctl status)/.test(c);
-    if(s.id==='storage-full')return /^(df |du |ls )/.test(c);
-    return /^(kubectl (get|describe|rollout status))/.test(c);
-  }
-  function grade(s){const investigated=s.seen.includes('investigate')&&(s.id!=='image'||s.seen.includes('image-source')||s.seen.includes('revision-source')),repair=healthy(s),verify=repair&&s.validated;return {investigated,repair,verify,passed:investigated&&repair&&verify,percent:(Number(investigated)+Number(repair)+Number(verify))*100/3};}
+  function grade(s){const investigated=s.seen.includes('investigate'),repair=healthy(s),verify=repair&&s.validated;return {investigated,repair,verify,passed:investigated&&repair&&verify,percent:100*(Number(investigated)+Number(repair)+Number(verify))/3};}
   function cmsh(s,cmd){
     const b=s.bcm,dev=b.node003,t=cmd.split(' ');
     if(cmd==='help'||cmd==='?')return docs.cmsh;
@@ -183,6 +223,13 @@ const NAVIAOps = (() => {
   }
   function linux(s,cmd){
     const n=s.nodes.node002,k=s.k8s,b=s.bcm.node003,j=s.jobs[1042],a=cmd.split(' ');
+    if(a[0]==='ssh'){
+      if(a[1]!=='node002')return err('This training cluster supports ssh node002. Check node names with sinfo or kubectl get nodes.');
+      const sub=cmd.slice('ssh node002 '.length);
+      if(!sub||sub===cmd)return err('Usage: ssh node002 COMMAND');
+      if(!/^(sudo )?(systemctl|journalctl|nvidia-smi|cat)\b/.test(sub))return err('Remote command not modeled; use ssh node002 systemctl status slurmd or kubelet.');
+      return linux(s,sub);
+    }
     if(a[0]==='sinfo'){
       if(a.includes('-R'))return Object.entries(s.nodes).filter(([,x])=>x.reason).map(([id,x])=>`REASON                         USER     NODELIST\n${x.reason.padEnd(30)} trainer  ${id}`).join('\n')||'No unavailable nodes';
       if(a.includes('-N'))return 'NODELIST NODES PARTITION STATE\n'+Object.entries(s.nodes).map(([id,x])=>`${id} 1 gpu ${x.state.toLowerCase()}`).join('\n');
@@ -294,8 +341,8 @@ const NAVIAOps = (() => {
       return err('Unknown pod or daemonset');
     }
     if(a[1]==='rollout'){
-      if(a[2]==='history'&&a[3]==='deployment/inference')return 'deployment.apps/inference\nREVISION CHANGE-CAUSE\n1 Initial approved image (see inference-previous ReplicaSet)\n2 Current rollout';
-      if(a[2]==='undo'&&a[3]==='deployment/inference'){k.image=GOOD_IMAGE;k.ready=true;return 'deployment.apps/inference rolled back to previous ReplicaSet image. Check rollout status.';}
+      if(a[2]==='history'&&a[3]==='deployment/inference'){if(/--revision(?:=| )1\b/.test(cmd))return 'deployment.apps/inference revision 1\nContainers:\n inference: '+GOOD_IMAGE+'\nPrevious approved rollout';return 'deployment.apps/inference\nREVISION CHANGE-CAUSE\n1 Initial approved rollout (inspect --revision=1 or previous ReplicaSet)\n2 Current rollout';}
+      if(a[2]==='undo'&&a[3]==='deployment/inference'){if(/--to-revision(?:=| )(\d+)/.test(cmd)&&!/^1$/.test(cmd.match(/--to-revision(?:=| )(\d+)/)[1]))return err('Only revision 1 is retained as healthy in this simulation');k.image=GOOD_IMAGE;k.ready=true;return 'deployment.apps/inference rolled back to previously approved image; check rollout status.';}
       if(a[2]==='status'&&a[3]==='deployment/inference')return status==='Running'?'deployment "inference" successfully rolled out':'Waiting for deployment "inference": 0 of 1 replicas available. Status: '+status;
       if(a[2]==='restart'&&a[3]==='daemonset/nvidia-device-plugin-daemonset'&&ns==='gpu-operator'){
         k.plugin=true;k.ready=true;return 'daemonset.apps/nvidia-device-plugin-daemonset restarted; check node allocatable resources.';
@@ -310,13 +357,13 @@ const NAVIAOps = (() => {
       k.env=true;k.ready=true;return 'deployment.apps/inference environment updated; pod restarted.';
     }
     if(a[1]==='taint'&&a[2]==='nodes'&&a[3]==='node002'){
-      if(a[4]==='training=blocked:NoSchedule-'){k.taint=false;k.ready=true;return 'node/node002 untainted; pod can now schedule.';}
+      if(a[4]==='training=blocked:NoSchedule-'){if(!k.taint)return 'node/node002 does not have the specified taint; unchanged.';k.taint=false;k.ready=true;return 'node/node002 untainted; pod can now schedule.';}
       return err('Unsupported taint modification');
     }
     if(a[1]==='delete'&&a[2]==='pod'&&a[3]==='inference')return 'pod "inference" deleted; ReplicaSet recreated it with status '+status;
     return err('Unsupported Kubernetes subcommand in the simulation. '+docs.kubectl);
   }
-  return {create,run,grade,healthy,defs,docs,GOOD_IMAGE,GOOD_BCM_IMAGE};
+  return {create,run,grade,healthy,defs,docs,GOOD_IMAGE,GOOD_BCM_IMAGE,ENGINE_REVISION};
 })();
 if(typeof window!=='undefined')window.NAVIAOps=NAVIAOps;
 if(typeof module!=='undefined'&&module.exports)module.exports=NAVIAOps;
