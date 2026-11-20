@@ -6,7 +6,6 @@ const catalog=[
 ['Slurm','scontrol show node','Inspect detailed node state','scontrol show node NODE','Check state, reason and GPU resources before changing node status.','Inspect before using RESUME.'],
 ['Slurm','scontrol show job','Inspect a job and its pending reason','scontrol show job JOBID','Check why the scheduler has not started a job.','Look for JobState and Reason.'],
 ['Slurm','scontrol update','Change a node state (admin)','scontrol update NodeName=NODE State=RESUME','Resume only after confirming the underlying fault is cleared.','A node that is still unhealthy should not be resumed.'],
-['Slurm','sbatch','Submit a batch job','sbatch FILE','Run a batch script through Slurm scheduling.','A job may remain pending when resources are unavailable.'],
 ['Slurm','scancel','Cancel a queued or running job','scancel JOBID','Stop a job you are authorized to cancel.','Cancellation frees allocated resources in the simulation.'],
 ['Slurm','sacct','Inspect historical accounting','sacct','Review recent job outcomes.','Accounting is simplified in this training environment.'],
 ['Kubernetes','kubectl get nodes','List Kubernetes nodes','kubectl get nodes','Verify readiness and cluster capacity.','NotReady nodes may block scheduling.'],
@@ -17,43 +16,29 @@ const catalog=[
 ['Kubernetes','kubectl get rs','Inspect previous deployment image','kubectl get rs -o yaml','Find the last working image from a previous ReplicaSet.','Check spec.template.spec.containers[].image.'],
 ['Kubernetes','kubectl rollout undo','Revert a deployment','kubectl rollout undo deployment/inference','Restore a known-good previous revision.','Verify rollout status after undo.'],
 ['Kubernetes','kubectl rollout status','Verify deployment rollout','kubectl rollout status deployment/inference','Confirm new replicas become available.','Wait for successfully rolled out.'],
-['Kubernetes','kubectl set image','Update a deployment image','kubectl set image deployment/NAME CONTAINER=IMAGE','Repair an invalid image reference.','Verify the resulting pod reaches Running.'],
-['Kubernetes','kubectl apply','Apply a workload manifest','kubectl apply -f FILE','Deploy a training workload from a predefined manifest.','Only demo.yaml is simulated in this release.'],
+['Kubernetes','kubectl set image','Update a deployment image','kubectl set image deployment/inference inference=IMAGE','Discover IMAGE by inspecting the previous approved ReplicaSet; never guess the image tag.','Verify rollout status and pod readiness after replacement.'],
 ['Kubernetes','kubectl delete pod','Delete a pod','kubectl delete pod NAME','Recreate a managed pod after an issue is corrected.','Deleting without fixing the cause will not repair it.'],
 ['BCM','cmsh','Enter Base Command Manager shell','cmsh','Open the BCM management context.','This trainer supports a documented subset of cmsh commands.'],
 ['BCM','device','Select device management mode','device','Inspect and modify simulated compute nodes.','Use inside cmsh.'],
 ['BCM','list','List managed devices','list','Verify a node is known to BCM.','Shows provisioned and unprovisioned devices.'],
 ['BCM','use','Select a device','use NODE','Choose the node to inspect or configure.','Required before get/set operations.'],
-['BCM','get','Read a device property','get PROPERTY','Inspect hostname, category, image, or status.','Read before writing.'],
+['BCM','get','Read a device property','get softwareimage | get category','Inspect the node softwareimage and category assignments.','Use softwareimage, not image, as the BCM field.'],
 ['BCM','set','Stage a device configuration change','set PROPERTY VALUE','Set a software image or category for the selected device.','Changes require commit.'],
-['BCM','commit','Save staged BCM changes','commit','Persist staged device settings.','Commit stores the settings; boot/provisioning is not emulated.'],
+['BCM','commit','Save staged BCM changes','commit','Persist staged device settings.','A synthetic provisioning outcome is simulated after proper image, category, and power actions.'],
 
 ['Linux','nvidia-smi','Inspect GPU status','nvidia-smi','Check GPU presence, utilization and health.','Output is synthetic and does not read a real GPU.'],
 ['Linux','help','Show supported commands','help','Discover the simulation command surface.','Commands not listed are not implemented.']
 ];
-const questions=[
-['A Slurm job is pending with Reason=Resources. What should you inspect first?',['squeue and scontrol show job','kubectl logs','cmsh commit','Reboot every node'],0,'Inspect scheduling requirements and available resources before changing the cluster.','Workload Management'],
-['A Slurm node is DRAIN with a maintenance reason. What is the safest first action?',['Force RESUME immediately','Confirm maintenance and node health','Delete the partition','Cancel every job'],1,'A drained node may be intentionally unavailable; resolve the cause before resuming.','Troubleshooting'],
-['Which command shows Slurm node unavailability reasons?',['sacct','sinfo -R','sbatch','kubectl describe pod'],1,'sinfo -R displays reasons associated with unavailable nodes.','Administration'],
-['A pod is in ImagePullBackOff. What should you check?',['The container image name and registry access','Only the GPU temperature','Slurm partition priority','BCM category'],0,'ImagePullBackOff points to an image retrieval problem.','Troubleshooting'],
-['Which command displays Kubernetes pod events?',['kubectl describe pod inference','kubectl logs --all-nodes','squeue','cmsh list'],0,'describe includes pod conditions and events.','Administration'],
-['What does a Kubernetes NotReady node indicate?',['A healthy schedulable node','A node failing readiness checks','A Slurm job completed','A valid container image'],1,'Readiness affects workload placement.','Administration'],
-['Which is the appropriate tool for managing BCM devices?',['cmsh','sacct','kubectl top','sbatch'],0,'cmsh is the BCM command shell.','Installation & Deployment'],
-['Why is commit important in a BCM configuration workflow?',['It applies staged changes','It lists GPU jobs','It repairs DNS automatically','It creates a Kubernetes service'],0,'Changes in the management shell must be committed.','Installation & Deployment'],
-['What is the best validation after provisioning a node?',['Assume it worked','Confirm managed state and scheduler visibility','Delete the image','Drain every node'],1,'Verify each layer before accepting the node.','Installation & Deployment'],
-['Which command can inspect a job pending reason?',['scontrol show job 1042','kubectl get nodes','nvidia-smi -q','cmsh device'],0,'scontrol show job reports scheduling details.','Workload Management'],
-['What does PD mean in squeue output?',['Pod deleted','Pending','Power disabled','Partition drained'],1,'PD is Slurm pending state.','Workload Management'],
-['When should an operator use scancel?',['To stop an authorized job','To configure a BCM image','To create a pod','To clear a GPU fault automatically'],0,'scancel terminates Slurm jobs; use only with proper authorization.','Workload Management']
-];
 function initial(){return {nodes:{node001:{state:'idle',reason:'',gpu:8,allocated:0},node002:{state:'idle',reason:'',gpu:8,allocated:0}},jobs:{1042:{state:'PD',reason:'Priority',node:'',gpu:8}},pod:{name:'inference',image:'nvcr.io/nvidia/pytorch:24.08-py3',status:'Running'},bcm:{node003:{image:'',category:'',provisioned:false}},shell:'bash',mode:'',selected:'',staged:{},history:[],commands:0,repairs:0,completed:[],fault:'none'} }
-let state;try{state=JSON.parse(localStorage.getItem('cf-state'))||initial()}catch{state=initial()};let labHistory=[];try{labHistory=JSON.parse(localStorage.getItem('cf-lab-history-v10')||'[]')}catch{};function persistLabHistory(){localStorage.setItem('cf-lab-history-v10',JSON.stringify(labHistory))};let examHistory=[];try{examHistory=JSON.parse(localStorage.getItem('cf-exam-history-v10')||'[]')}catch{};function persistExamHistory(){localStorage.setItem('cf-exam-history-v10',JSON.stringify(examHistory))}let page='dashboard',selectedCommand=0,exam=null;let mock=null;let guide=JSON.parse(localStorage.getItem('cf-guide-v6')||'null');
+let state;try{state=JSON.parse(localStorage.getItem('cf-state'))||initial()}catch{state=initial()};let labHistory=[];try{labHistory=JSON.parse(localStorage.getItem('cf-lab-history-v10')||'[]')}catch{};function persistLabHistory(){localStorage.setItem('cf-lab-history-v10',JSON.stringify(labHistory))};let examHistory=[];try{examHistory=JSON.parse(localStorage.getItem('cf-exam-history-v10')||'[]')}catch{};function persistExamHistory(){localStorage.setItem('cf-exam-history-v10',JSON.stringify(examHistory))}let page='dashboard',selectedCommand=0;let mock=null;let guide=JSON.parse(localStorage.getItem('cf-guide-v6')||'null');
+if(guide&&(!NAVIAOps.defs[guide.id]||!state.ops||!state.ops.k8s||!state.ops.nodes||!Array.isArray(guide.done)||guide.done.some(i=>i>=3))){guide=null;state.ops=null;state.fault='none'}
 function save(){localStorage.setItem('cf-state',JSON.stringify(state));localStorage.setItem('cf-guide-v6',JSON.stringify(guide))}function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function button(t,fn,cls=''){return `<button class="button ${cls}" onclick='${fn}'>${t}</button>`}function count(){return state.completed.length}function render(){document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));app.innerHTML=({dashboard:dashboard,terminal:terminal,academy:academy,faults:faults,exams:exams})[page]();{let o=$('#output');if(o)o.scrollTop=o.scrollHeight;if(page==='terminal')$('#command')?.focus()}}
 document.querySelectorAll('nav button').forEach(b=>b.addEventListener('click',()=>{if(mock&&mock.phase!=='results'&&b.dataset.page!=='exams'){page='exams'}else page=b.dataset.page;render()}));window.go=p=>{page=mock&&mock.phase!=='results'?'exams':p;render()};
 function dashboard(){return `<h1>AI Operations Command Center</h1><p class="sub">Learn the commands. Break the cluster. Diagnose and recover it.</p><div class="grid"><div class="card"><div class="muted">Commands executed</div><div class="metric">${state.commands}</div><p>Stateful terminal activity</p></div><div class="card"><div class="muted">Unique labs completed</div><div class="metric">${state.completed.length} / ${Object.keys(walkthroughs).length}</div><p>Verified recovery events</p></div><div class="card"><div class="muted">Academy commands</div><div class="metric">${catalog.length}</div><p>Across four tool families</p></div></div><div class="grid"><div class="card"><h2>⌘ Live terminal</h2><p>Operate BCM, Slurm, and Kubernetes against a shared synthetic cluster.</p>${button('Open terminal','go("terminal")','primary')}</div><div class="card"><h2>⚡ Fault injection</h2><p>Practice 15 guided scenarios across the three exam lab themes and related operations.</p>${button('Launch fault lab','go("faults")')}</div><div class="card"><h2>◉ Practice questions</h2><p>30 randomized questions, three hands-on labs, a shared 120-minute timer, and weighted scoring.</p>${button('Start exam practice','go("exams")')}</div></div><div class="card"><h2>Cluster snapshot</h2><div class="grid"><div><h3>Slurm nodes</h3>${Object.entries(state.nodes).map(([n,v])=>`<p>${n}: <span class="${v.state==='idle'?'success':'warning'}">${v.state}</span></p>`).join('')}</div><div><h3>Kubernetes</h3><p>inference: <span class="${state.pod.status==='Running'?'success':'warning'}">${state.pod.status}</span></p></div><div><h3>BCM</h3><p>node003: ${state.bcm.node003.provisioned?'Provisioned':'Not provisioned'}</p></div></div></div>`}
 function terminal(){
- const active=guide&&walkthroughs[guide.id],steps=active?.steps||[],step=steps[guide?.at],finished=active&&!step;
- const current=active?`<section class="lab-panel" aria-label="Scenario objectives"><div class="lab-panel-top"><div><span class="eyebrow">${mock?.phase==='labs'?'MOCK EXAM · LAB '+(mock.labIndex+1)+'/3':'ACTIVE GUIDED LAB'}</span><h2>${esc(active.name)}</h2></div>${mock?.phase==='labs'?'':`<button class="button tiny" onclick="go('faults')">All labs</button>`}</div><div class="scenario-brief"><strong>Incident scenario</strong><p>${esc(active.story)}</p><p>Training environment: synthetic cluster with Slurm, Kubernetes and BCM. Use the incident description and terminal output to diagnose the fault, then verify recovery.</p><details><summary>Show supported commands for this scenario</summary><pre>${esc(steps.map(x=>x[2]).join('\n'))}</pre></details><a href="https://www.nvidia.com/en-us/learn/certification/ai-operations-professional/" target="_blank" rel="noopener">NVIDIA NCP-AIO exam topics ↗</a></div><div class="lab-meter"><span>${finished?'Complete':`Step ${guide.at+1} / ${steps.length}`}</span><span>${Math.round(100*guide.at/steps.length)}%</span></div><div class="progress"><div style="width:${100*guide.at/steps.length}%"></div></div>${finished?`<div class="objective-box"><strong>✓ Lab completed!</strong><p>You verified the simulated recovery.</p>${mock?.phase==='labs'?button('Submit this lab', 'submitMockLab()', 'primary'):button('Restart this lab',`startWalkthrough('${guide.id}')`,'primary')}</div>`:`<div class="objective-box"><span class="eyebrow">DO THIS NOW · ${esc(step[0])}</span><p>${esc(step[1])}</p><div class="objective-actions">${mock?.phase==='labs'?'':`<button class="button" onclick="quick('hint')">Investigation hint</button>`}<button class="button" onclick="quick('help')">Command reference</button></div></div>`}<details class="checklist-details" ${finished?'open':''}><summary>Checklist · ${guide.at} of ${steps.length} done <span class="chevron">⌄</span></summary><ol class="checklist">${steps.map((item,i)=>`<li class="${(guide.done||[]).includes(i)?'done':i===guide.at?'current':'pending'}"><span class="checkmark">${(guide.done||[]).includes(i)?'✓':i===guide.at?'→':'○'}</span><span><strong>${esc(item[0])}</strong><small>${esc(item[1])}</small></span></li>`).join('')}</ol></details>${state.lastGuideFeedback?`<div class="lab-feedback" role="status">${esc(state.lastGuideFeedback)}</div>`:''}</section>`:'';
- const panel=`<section class="terminal-panel" aria-label="Simulated command terminal"><div class="terminalbar"><span>⌘ tyler-ncp-aio@training-01</span><div class="flex"><span class="tag">${esc(state.shell==='bash'?'Linux':'BCM cmsh')}</span>${button('Clear','clearScreen()','tiny')}</div></div><div id="output" class="output" role="log" aria-live="polite">${state.history.length?state.history.map(h=>`<span class="prompt">${esc(h.prompt)}</span> ${esc(h.command)}\n${esc(h.result)}\n`).join('\n'):"Welcome to Tyler\'s NCP-AIO Practice Sim and Mock Exam.\nType hint for the next command or help for available commands.\n"}</div><form class="cmdline" onsubmit="runCommand(event)"><span class="prompt">${state.shell==='cmsh'?'cmsh>':'$'}</span><input id="command" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Terminal command" placeholder="Type command or hint…"><button class="button primary" type="submit">Run ↵</button></form><div class="terminal-shortcuts"><button onclick="quick('hint')">💡 Hint</button><button onclick="quick('help')">Help</button>${mock?.phase==='labs'?'':button('Reset cluster','resetCluster()','tiny')}</div></section>`;
+ const active=guide&&walkthroughs[guide.id],steps=active?.steps||[],step=active?steps.find((_,i)=>!(guide?.done||[]).includes(i)):null,finished=active&&!step;
+ const current=active?`<section class="lab-panel" aria-label="Scenario objectives"><div class="lab-panel-top"><div><span class="eyebrow">${mock?.phase==='labs'?'MOCK EXAM · LAB '+(mock.labIndex+1)+'/3':'ACTIVE GUIDED LAB'}</span><h2>${esc(active.name)}</h2></div>${mock?.phase==='labs'?'':`<button class="button tiny" onclick="go('faults')">All labs</button>`}</div><div class="scenario-brief"><strong>Incident scenario</strong><p>${esc(active.story)}</p><p>Training environment: synthetic cluster with Slurm, Kubernetes and BCM. Use the incident description and terminal output to diagnose the fault, then verify recovery.</p>${mock?.phase==='labs'?'':`<details><summary>Show guided command examples</summary><pre>${esc(steps.map(x=>x[2]).join('\n'))}</pre></details>`}<a href="https://www.nvidia.com/en-us/learn/certification/ai-operations-professional/" target="_blank" rel="noopener">NVIDIA NCP-AIO exam topics ↗</a></div><div class="lab-meter"><span>${finished?'Complete':`Step ${Math.min(guide.at+1,steps.length)} / ${steps.length}`}</span><span>${Math.round(100*guide.at/steps.length)}%</span></div><div class="progress"><div style="width:${100*guide.at/steps.length}%"></div></div>${finished?`<div class="objective-box"><strong>✓ Lab completed!</strong><p>You verified the simulated recovery.</p>${mock?.phase==='labs'?button('Submit this lab', 'submitMockLab()', 'primary'):button('Restart this lab',`startWalkthrough('${guide.id}')`,'primary')}</div>`:`<div class="objective-box"><span class="eyebrow">CURRENT GOAL · ${esc(step[0])}</span><p>${esc(step[1])}</p><div class="objective-actions">${mock?.phase==='labs'?'':`<button class="button" onclick="quick('hint')">Investigation hint</button>`}<button class="button" onclick="quick('help')">Command reference</button></div></div>`}<details class="checklist-details" ${finished?'open':''}><summary>Checklist · ${guide.at} of ${steps.length} done <span class="chevron">⌄</span></summary><ol class="checklist">${steps.map((item,i)=>`<li class="${(guide.done||[]).includes(i)?'done':i===guide.at?'current':'pending'}"><span class="checkmark">${(guide.done||[]).includes(i)?'✓':i===guide.at?'→':'○'}</span><span><strong>${esc(item[0])}</strong><small>${esc(item[1])}</small></span></li>`).join('')}</ol></details>${state.lastGuideFeedback?`<div class="lab-feedback" role="status">${esc(state.lastGuideFeedback)}</div>`:''}</section>`:'';
+ const panel=`<section class="terminal-panel" aria-label="Simulated command terminal"><div class="terminalbar"><span>⌘ tyler-ncp-aio@training-01</span><div class="flex"><span class="tag">${esc(state.shell==='bash'?'Linux':'BCM cmsh')}</span>${button('Clear','clearScreen()','tiny')}</div></div><div id="output" class="output" role="log" aria-live="polite">${state.history.length?state.history.map(h=>`<span class="prompt">${esc(h.prompt)}</span> ${esc(h.command)}\n${esc(h.result)}\n`).join('\n'):"Welcome to Tyler\'s NCP-AIO Practice Sim and Mock Exam.\nType help for supported commands, then investigate the incident.\n"}</div><form class="cmdline" onsubmit="runCommand(event)"><span class="prompt">${state.shell==='cmsh'?'cmsh>':'$'}</span><input id="command" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Terminal command" placeholder="Type command or hint…"><button class="button primary" type="submit">Run ↵</button></form><div class="terminal-shortcuts">${mock?.phase==='labs'?'':`<button onclick="quick('hint')">💡 Hint</button>`}<button onclick="quick('help')">Help</button>${mock?.phase==='labs'?'':button('Reset cluster','resetCluster()','tiny')}</div></section>`;
  return `<div class="lab-workspace ${active?'guided':'free'}"><div class="workspace-head"><div><h1>${active?'Lab workspace':'Practice terminal'}</h1><p>${active?'Your objective and terminal stay together.':'Explore simulated Slurm, Kubernetes and BCM commands.'}</p></div>${mock?.phase==='labs'?button('Submit / skip lab','submitMockLab()','tiny'):active?button('Choose another lab','go("faults")','tiny'):button('Guided labs','go("faults")','primary')}</div><div class="workspace-grid">${current}${panel}</div></div>`
 }
 function help(){return [
@@ -65,70 +50,57 @@ function help(){return [
 '  scontrol show node NODE           - Node detail',
 '  scontrol show job 1042            - Job detail',
 '  scontrol update NodeName=NODE State=RESUME  - Resume node',
-'  sbatch demo.sh | scancel JOBID | sacct  - Jobs / accounting',
+'  scancel JOBID | sacct             - Jobs / accounting (sbatch needs script unavailable in this lab)',
+'  scontrol update JobId=1042 PartitionName=gpu',
+'  systemctl status slurmd | journalctl -u slurmd -n 20',
 '',
 'KUBERNETES / WORKLOADS',
 '  kubectl get pods | kubectl get nodes',
 '  kubectl describe pod NAME | kubectl logs NAME',
+'  kubectl get rs -o yaml | kubectl rollout history deployment/inference',
 '  kubectl set image deployment/inference inference=IMAGE',
-'  kubectl apply -f demo.yaml | kubectl delete pod NAME',
+'  kubectl rollout undo deployment/inference | kubectl rollout status deployment/inference',
+'  kubectl delete pod inference       - Recreate a managed test pod',
+'  kubectl describe node node002 | kubectl get daemonset -n gpu-operator',
+'  kubectl taint nodes node002 training=blocked:NoSchedule-',
+'  kubectl set env deployment/inference MODEL_PATH=/models',
+'  kubectl rollout restart daemonset/nvidia-device-plugin-daemonset -n gpu-operator',
 '',
 'BASE COMMAND MANAGER (BCM)',
 '  cmsh                             - Enter BCM shell',
 '  device | list | use NODE | get PROPERTY',
-'  set image VALUE | set category VALUE | commit',
+'  set softwareimage NAME | set category NAME | commit',
 '  exit',
 '',
 'GPU / GENERAL',
 '  nvidia-smi                        - Inspect GPUs',
+'  systemctl status kubelet | sudo systemctl restart kubelet',
+'  df -h | du -sh /shared/* | ls -lh /shared/old-checkpoint.tmp',
 '  help | clear | hint               - Training controls',
 '',
 'All simulator repairs use real CLI syntax; outputs and infrastructure remain synthetic.',
 'Check the active objective and scenario details before applying changes.'
 ].join('\n')}
 
-function evaluate(raw){const extended=extendedEvaluate(raw);if(extended!==null)return extended;const cmd=raw.trim(),a=cmd.split(/\s+/);if(!cmd)return '';if(cmd==='help'||cmd==='?')return help();if(cmd.toLowerCase()==='hint')return terminalHint();if(cmd==='clear'){state.history=[];return 'Screen cleared.'}if(state.shell==='cmsh'){if(cmd==='exit'){state.shell='bash';state.mode='';return 'Exited cmsh.'}if(cmd==='device'){state.mode='device';return 'device mode: list, use node003, get image, set image IMAGE, set category CATEGORY, commit'}if(!state.mode)return 'Enter device to manage devices, or exit.';if(cmd==='list')return Object.entries(state.bcm).map(([n,d])=>`${n}  image=${d.image||'(unset)'}  category=${d.category||'(unset)'}  configured=${Boolean(d.image&&d.category)?'yes':'no'} boot_status=not_simulated`).join('\n');if(a[0]==='use'){if(!state.bcm[a[1]])return 'Unknown BCM device.';state.selected=a[1];return 'Selected '+a[1]}if(a[0]==='get'){if(!state.selected)return 'Select a device first: use node003';return `${a[1]} = ${state.staged[a[1]]??state.bcm[state.selected][a[1]]??'(unset)'}`}if(a[0]==='set'){if(!state.selected)return 'Select a device first.';if(!['image','category'].includes(a[1])||!a[2])return 'Usage: set image IMAGE or set category CATEGORY';state.staged[a[1]]=a.slice(2).join(' ');return 'Staged '+a[1]+' = '+state.staged[a[1]]+'; run commit.'}if(cmd==='commit'){if(!state.selected)return 'Select a device first.';Object.assign(state.bcm[state.selected],state.staged);state.staged={};return 'Configuration committed.'}return 'Unsupported cmsh command. Try device, list, use, get, set, commit, provision, exit.'}
-if(cmd==='cmsh'){state.shell='cmsh';state.mode='';return 'NVIDIA Base Command Manager shell (training subset). Type device.'}
-if(a[0]==='sinfo'){if(a[1]==='-R'){const rows=Object.entries(state.nodes).filter(([,n])=>n.reason).map(([id,n])=>`${n.reason.padEnd(22)} trainer ${id}`);return rows.length?'REASON                 USER    NODELIST\n'+rows.join('\n'):'No unavailable nodes'}return 'PARTITION AVAIL NODES STATE NODELIST\ngpu*      up    2     '+Object.entries(state.nodes).map(([id,n])=>`${id}:${n.state}`).join(' ')}
-if(cmd==='squeue')return 'JOBID PARTITION NAME USER ST REASON NODELIST\n'+Object.entries(state.jobs).map(([id,j])=>`${id} gpu train trainer ${j.state} ${j.reason||'-'} ${j.node||'-'}`).join('\n');
-if(a[0]==='scontrol'){if(a[1]==='show'&&a[2]==='node'){let id=a[3],n=state.nodes[id];return n?`NodeName=${id}\nState=${n.state.toUpperCase()}\nReason=${n.reason||'None'}\nGres=gpu:${n.gpu}\nAllocTRES=gres/gpu=${n.allocated}`:'Unknown node'}if(a[1]==='show'&&a[2]==='job'){let j=state.jobs[a[3]];return j?`JobId=${a[3]} JobState=${j.state==='PD'?'PENDING':'RUNNING'} Reason=${j.reason||'None'} NumGPUs=${j.gpu}`:'Unknown job'}if(a[1]==='update'){let m=cmd.match(/NodeName=(\w+)\s+State=RESUME/i);if(!m)return 'Supported syntax: scontrol update NodeName=node002 State=RESUME';let n=state.nodes[m[1]];if(!n)return 'Unknown node';if(n.state!=='drain')return 'Node is not drained.';n.state='idle';n.reason='';return `${m[1]} resumed; verify with sinfo.`}}
-if(a[0]==='sbatch'){if(a[1]!=='demo.sh')return 'Training supports sbatch demo.sh';let id=String(Math.max(...Object.keys(state.jobs).map(Number))+1);state.jobs[id]={state:'PD',reason:'Priority',node:'',gpu:1};return 'Submitted batch job '+id}
-if(a[0]==='scancel'){if(!state.jobs[a[1]])return 'Unknown job';delete state.jobs[a[1]];return 'Cancelled job '+a[1]}
-if(cmd==='sacct')return 'JobID State\n'+Object.entries(state.jobs).map(([id,j])=>`${id} ${j.state==='PD'?'PENDING':'RUNNING'}`).join('\n');
-if(a[0]==='kubectl'){
- const tokens=cmd.replace(/\s+-n\s+\S+/g,'').replace(/\s+--namespace(?:=|\s+)\S+/g,'').trim();
- const b=tokens.split(/\s+/), badImage=state.pod.status==='ImagePullBackOff', approved='nvcr.io/nvidia/pytorch:24.08-py3';
- if(b[1]==='get'&&['pods','pod','po'].includes(b[2]))return `NAME READY STATUS RESTARTS\ninference ${badImage?'0/1':'1/1'} ${state.pod.status} 0`;
- if(b[1]==='get'&&b[2]==='nodes')return 'NAME STATUS ROLES\nnode001 Ready worker\nnode002 Ready worker';
- if(b[1]==='get'&&['deploy','deployment','deployments'].includes(b[2]))return `NAME READY UP-TO-DATE AVAILABLE\ninference ${badImage?'0/1':'1/1'} 1 ${badImage?'0':'1'}`;
- if(b[1]==='get'&&['rs','replicasets','replicaset'].includes(b[2])){
-  if(b.includes('-o')&&(b.includes('yaml')||b.includes('json')))return `apiVersion: apps/v1\nkind: ReplicaSet\nmetadata:\n  name: inference-previous\n  annotations:\n    deployment.kubernetes.io/revision: "1"\nspec:\n  template:\n    spec:\n      containers:\n      - name: inference\n        image: ${approved}\n---\nkind: ReplicaSet\nmetadata:\n  name: inference-current\n  annotations:\n    deployment.kubernetes.io/revision: "2"\nspec:\n  template:\n    spec:\n      containers:\n      - name: inference\n        image: ${state.pod.image}`;
-  return `NAME DESIRED CURRENT READY\ninference-previous 0 0 0\ninference-current 1 1 ${badImage?'0':'1'}`;
- }
- if(b[1]==='get'&&['deploy','deployment'].includes(b[2])&&b.includes('-o'))return `kind: Deployment\nmetadata:\n  name: inference\nspec:\n  template:\n    spec:\n      containers:\n      - name: inference\n        image: ${state.pod.image}`;
- if(b[1]==='describe'&&b[2]==='pod')return b[3]===state.pod.name?`Name: ${state.pod.name}\nImage: ${state.pod.image}\nStatus: ${state.pod.status}\nEvents: ${badImage?'Warning Failed Failed to pull image: manifest unknown':'Normal Pulled Successfully pulled image'}`:'Error from server (NotFound): pods not found';
- if(b[1]==='describe'&&['deployment','deploy'].includes(b[2]))return `Name: inference\nImage: ${state.pod.image}\nAvailable: ${badImage?'0':'1'}`;
- if(b[1]==='rollout'&&b[2]==='history')return `deployment.apps/inference\nREVISION CHANGE-CAUSE\n1 Initial working deployment (${approved})\n2 Image update`;
- if(b[1]==='rollout'&&b[2]==='undo'&&b[3]==='deployment/inference'){state.pod.image=approved;state.pod.status='Running';return 'deployment.apps/inference rolled back';}
- if(b[1]==='rollout'&&b[2]==='status'&&b[3]==='deployment/inference')return badImage?'Waiting for deployment "inference" rollout to finish: 0 of 1 updated replicas are available...':'deployment "inference" successfully rolled out';
- if(b[1]==='logs')return b[2]===state.pod.name?(badImage?'Error from server (BadRequest): container is waiting to start: ImagePullBackOff':'Inference service started successfully'):'Error from server (NotFound): pods not found';
- if(b[1]==='set'&&b[2]==='image'){
-  let m=tokens.match(/^kubectl set image deployment\/inference inference=(\S+)$/);
-  if(!m)return 'error: usage: kubectl set image deployment/inference inference=IMAGE';
-  state.pod.image=m[1];state.pod.status=m[1]===approved?'Running':'ImagePullBackOff';
-  return 'deployment.apps/inference image updated. Inspect rollout status and pod events.';
- }
- if(b[1]==='apply'&&b[2]==='-f'&&b[3]==='demo.yaml'){state.pod={name:'inference',image:approved,status:'Running'};return 'deployment.apps/inference configured'}
- if(b[1]==='delete'&&b[2]==='pod'&&b[3]===state.pod.name)return 'pod/inference deleted; deployment controller recreated pod. Status: '+state.pod.status;
- return 'Unsupported kubectl command in this training environment. Type help.';
+function syncClusterSnapshot(){
+ if(!state.ops)return;
+ const s=state.ops,k=s.k8s;
+ state.nodes=Object.fromEntries(Object.entries(s.nodes).map(([name,n])=>[name,{state:n.state.toLowerCase(),reason:n.reason,gpu:n.gres,allocated:n.allocated}]));
+ state.pod={name:'inference',image:k.image,status:k.image!==NAVIAOps.GOOD_IMAGE?'ImagePullBackOff':!k.kubelet||k.taint||!k.plugin?'Pending':!k.env?'CrashLoopBackOff':'Running'};
+ state.bcm={node003:{image:s.bcm.node003.softwareimage,category:s.bcm.node003.category,provisioned:s.bcm.node003.provisioned}};
 }
-if(cmd==='nvidia-smi')return 'NVIDIA-SMI (SIMULATED)\nGPU 0-7: Training GPU | Healthy | 0 MiB / 80000 MiB';return 'Command not implemented in this simulator. Type help.'}
+function evaluate(raw){
+ if(!state.ops||state.ops.id!==(guide?.id||'free')||!state.ops.k8s||!state.ops.nodes)state.ops=NAVIAOps.create(guide?.id||'free');
+ const result=NAVIAOps.run(state.ops,raw);
+ syncClusterSnapshot();state.shell=state.ops.shell;
+ return result;
+}
 function complete(id){if(!state.completed.includes(id)){state.completed.push(id);state.repairs++;const record={labId:id,completedAt:new Date().toISOString()};labHistory.push(record);persistLabHistory();window.CFCloud?.saveLab?.(record)}}
-window.runCommand=e=>{e.preventDefault();let input=$('#command'),cmd=input.value.trim();if(!cmd)return;if(mock?.phase==='labs'&&cmd.toLowerCase()==='hint')mockHintUsed();let prompt=state.shell==='cmsh'?'cmsh>':'$';let result=cmd.toLowerCase()==="hint"?terminalHint():evaluate(cmd);if(mock?.phase==='labs'&&cmd.toLowerCase()==='hint'&&guide){const used=mock.labResults[mock.labIndex]?.hints[guide.at]||0;result+=`
+window.runCommand=e=>{e.preventDefault();let input=$('#command'),cmd=input.value.trim();if(!cmd)return;if(mock?.phase==='labs'&&cmd.toLowerCase()==='hint')return;let prompt=state.shell==='cmsh'?'cmsh>':'$';let result=cmd.toLowerCase()==="hint"?terminalHint():evaluate(cmd);if(mock?.phase==='labs'&&cmd.toLowerCase()==='hint'&&guide){const used=mock.labResults[mock.labIndex]?.hints[guide.at]||0;result+=`
 
 EXAM PENALTY: ${used===1?50:used===2?75:100}% of this checklist step's points forfeited.`;}if(guide?.id==='image'&&/^kubectl (get (rs|replicasets).* -o (yaml|json)|rollout history deployment\/inference)/.test(cmd))state.imageEvidenceSeen=true;if(cmd.toLowerCase()!=="hint")checkGuide(cmd,result);if(mock?.phase==='labs')syncMockLab();state.history.push({prompt,command:cmd,result});if(state.history.length>90)state.history.shift();state.commands++;save();saveMock();render()};window.quick=c=>{if(page!=='terminal'&&mock?.phase!=='labs')go('terminal');const input=$('#command');input.value=c;input.focus()};window.clearScreen=()=>{state.history=[];save();render()};window.resetCluster=()=>{if(confirm('Reset all simulated cluster state? Exam progress remains in this browser.')){let old=state;state=initial();state.commands=old.commands;state.repairs=old.repairs;state.completed=old.completed;save();render()}};
 function academy(){let q=$('#search')?.value||'';return `<h1>Command academy</h1><p class="sub">Understand the purpose, syntax, interpretation and operational context of each command.</p><div class="commands"><div class="card command-list">${catalog.map((c,i)=>`<button class="${i===selectedCommand?'selected':''}" onclick="chooseCommand(${i})"><span class="tag">${esc(c[0])}</span> ${esc(c[1])}</button>`).join('')}</div><div class="card">${(()=>{let c=catalog[selectedCommand];return `<span class="tag">${esc(c[0])}</span><h1 style="margin-top:12px">${esc(c[1])}</h1><h3>${esc(c[2])}</h3><h3>Syntax</h3><pre>${esc(c[3])}</pre><h3>What it does and why</h3><p>${esc(c[4])}</p><h3>How to interpret it</h3><p>${esc(c[5])}</p><div class="note">This academy documents a simplified simulator subset. Always check actual product/version documentation before using commands in production.</div><p>${button('Try in terminal',`go("terminal");quick(${JSON.stringify(c[1])})`,'primary')}</p>`})()}</div></div>`}window.chooseCommand=i=>{selectedCommand=i;render()};
-const faultTypes=[['drain','Slurm drained node','node002 becomes DRAIN; inspect and safely resume it.','sinfo -R → scontrol show node node002 → scontrol update NodeName=node002 State=RESUME'],['image','Kubernetes bad image','inference enters ImagePullBackOff; inspect events and correct the image.','kubectl get pods → kubectl describe pod inference → kubectl set image deployment/inference inference=nvcr.io/nvidia/pytorch:24.08-py3'],['bcm','BCM node configuration','node003 needs a committed image and category; verify configuration separately from PXE provisioning.','cmsh → device → use node003 → set image default-image → set category gpu → commit → list']];
+const faultTypes=[['drain','Slurm drained node','node002 becomes DRAIN; inspect and safely resume it.','sinfo -R → scontrol show node node002 → scontrol update NodeName=node002 State=RESUME'],['image','Kubernetes bad image','inference enters ImagePullBackOff; inspect events and correct the image.','kubectl get pods → kubectl describe pod inference → kubectl set image deployment/inference inference=nvcr.io/nvidia/pytorch:24.08-py3'],['bcm','BCM node configuration','node003 needs a committed image and category; verify configuration separately from PXE provisioning.','cmsh → device → use node003 → set softwareimage dgx-h100-image → set category gpu → commit → list']];
 const walkthroughs={
 drain:{name:'Restore a drained Slurm node',story:'A GPU job is waiting. node002 was left in DRAIN after maintenance. Your job is to investigate and safely return it to service.',steps:[
 ['Investigate','Find the reason a node is unavailable.','sinfo -R','Look for a maintenance reason.'],
@@ -145,7 +117,7 @@ bcm:{name:'Configure a BCM compute node',story:'node003 has been discovered but 
 ['Navigate','Enter device management.','device','Manage discovered devices.'],
 ['Discover','List devices and find node003.','list','It is UNPROVISIONED.'],
 ['Select','Select the device.','use node003','Changes now apply to node003.'],
-['Configure','Assign a software image.','set image default-image','Stage the image.'],
+['Configure','Assign a software image.','set softwareimage dgx-h100-image','Stage the image.'],
 ['Configure','Assign the GPU category.','set category gpu','Stage the category.'],
 ['Apply','Commit staged changes.','commit','Configuration is now saved.'],
 ['Inspect','Review device status after committing configuration.','list','A configured image/category does not itself guarantee that a node has booted.'],
@@ -208,10 +180,10 @@ const extendedLabs=[
 ['Device mode','Enter device management.','device','Inspect device inventory.'],
 ['List','Find node003.','list','Image is broken-image.'],
 ['Select','Select node003.','use node003','Stage changes on this device.'],
-['Inspect','Read the image assignment.','get image','Wrong image assigned.'],
-['Repair','Assign the known-good image.','set image default-image','Stage corrected image.'],
+['Inspect','Read the image assignment.','get softwareimage','Wrong image assigned.'],
+['Repair','Assign the known-good image.','set softwareimage dgx-h100-image','Stage corrected image.'],
 ['Commit','Commit changes.','commit','Save configuration.'],
-['Verify','Confirm corrected image.','get image','Image is default-image.']]},
+['Verify','Confirm corrected image.','get softwareimage','Software image is dgx-h100-image.']]},
 {id:'bcm-category',name:'BCM: incorrect node category',domain:'BCM',level:'Intermediate',story:'node003 is incorrectly assigned to a CPU category instead of the GPU category.',steps:[
 ['Enter BCM','Open the management shell.','cmsh','Start BCM session.'],
 ['Device mode','Open device management.','device','Navigate to devices.'],
@@ -237,114 +209,57 @@ for(const lab of extendedLabs){
 walkthroughs[lab.id]={name:lab.name,story:lab.story,steps:lab.steps,domain:lab.domain,level:lab.level};
 faultTypes.push([lab.id,lab.name,lab.story,'']);
 }
+// Published certification skills are mapped to three measurable state goals.
+// Help is progressive; no hardcoded answer or hidden :valid image is required.
+for(const [id,d] of Object.entries(NAVIAOps.defs)){
+ walkthroughs[id]={name:d.name,domain:d.domain,story:d.story,steps:[
+  ['Investigate','Inspect the incident and identify the cause using supported diagnostic commands.',d.investigate,'Use the incident ticket and terminal output; do not guess values.'],
+  ['Restore or isolate','Apply a justified repair or protective action so the required cluster state is reached.',d.repair,'This is one viable approach, not a mandatory exact string.'],
+  ['Verify','Use a separate read-only diagnostic command after remediation to confirm the target state.',d.verify,'The lab is not complete until a fresh verification succeeds.']
+ ]};
+}
+const extraCatalog=[
+ ['BCM','set softwareimage','Assign a BCM software image','device; use node003; set softwareimage dgx-h100-image; commit','BCM uses softwareimage, not set image.','Inspect the installed image inventory before assignment.'],
+ ['BCM','softwareimage list','Find valid BCM image names','cmsh -c "softwareimage; list"','Identify a registered image, then configure a node.','Do not guess a simulated name.'],
+ ['BCM','category list','Find valid node categories','cmsh -c "category; list"','Use BCM categories to group image and provisioning settings.','Check the category before committing.'],
+ ['BCM','power on','Provision a configured BCM device','power on -n node003','Power up a node after its image and category are committed.','Validate status and Slurm readiness separately.'],
+ ['Slurm','cat /etc/slurm/gres.conf','Inspect Slurm GRES mapping','cat /etc/slurm/gres.conf','Compare GPU discovery and configured GRES mapping.','A slurmd restart does not fix a misconfigured GRES file.'],
+ ['GPU','dcgmi diag','Inspect GPU health via DCGM','dcgmi diag -r 1','Run an available NVIDIA DCGM diagnostic check.','An Xid error may require node isolation or vendor support.'],
+ ['Kubernetes','kubectl get daemonset','Inspect GPU device plugin','kubectl get daemonset -n gpu-operator','Check plugin readiness before deciding on rollout restart.','GPU resource registration depends on healthy device plugins.'],
+ ['Kubernetes','kubectl taint nodes','Remove an unintended taint','kubectl taint nodes node002 training=blocked:NoSchedule-','Check taint and workload placement intent first.','Only remove an unwanted NoSchedule taint.'],
+ ['Kubernetes','kubectl set env','Repair deployment environment','kubectl set env deployment/inference MODEL_PATH=/models','Find required env values in app logs or documentation.','Verify pod health after deployment update.'],
+ ['Kubernetes','kubectl rollout restart','Restart an unhealthy device-plugin DaemonSet','kubectl rollout restart daemonset/nvidia-device-plugin-daemonset -n gpu-operator','Inspect logs before restarting.','Validate GPU allocatable resources afterwards.']
+];
+catalog.push(...extraCatalog);
 const labProgressKey='cf-lab-completions-v6';
 const _baseEvaluate=evaluate;
-function extendedEvaluate(raw){
-const cmd=raw.trim(),id=guide?.id;
-if(!id||!extendedLabs.some(l=>l.id===id))return null;
-const flags=state.trainingFlags||(state.trainingFlags={});
-const flag=(name,defaultValue)=>flags[name]??defaultValue;
-const repair=(name,result)=>{flags[name]=true;return result};
-const k=cmd.toLowerCase();
-if(id==='slurm-resources'){
-if(cmd==='squeue')return `JOBID PARTITION NAME USER ST REASON NODELIST\n1042 gpu train trainer ${flag('resources',false)?'R':'PD'} ${flag('resources',false)?'None':'Resources'} ${flag('resources',false)?'node002':'-'}`;
-if(cmd==='scontrol show job 1042')return `JobId=1042 JobState=${flag('resources',false)?'RUNNING':'PENDING'} Reason=${flag('resources',false)?'None':'Resources'} NumGPUs=8`;
-if(cmd==='scontrol show node node002')return `NodeName=node002 State=ALLOCATED Gres=gpu:8 AllocTRES=gres/gpu=${flag('resources',false)?'0':'8'}`;
-if(cmd==='scancel 1041')return repair('resources','Simulated stale reservation released; scheduler reconsidered job 1042.');
-}
-if(id==='slurm-partition'){
-if(cmd==='squeue')return `JOBID PARTITION NAME USER ST REASON NODELIST\n1042 ${flag('partition',false)?'gpu':'bad-gpu'} train trainer ${flag('partition',false)?'R':'PD'} ${flag('partition',false)?'None':'InvalidPartition'} ${flag('partition',false)?'node002':'-'}`;
-if(cmd==='scontrol show job 1042')return `JobId=1042 JobState=${flag('partition',false)?'RUNNING':'PENDING'} Partition=${flag('partition',false)?'gpu':'bad-gpu'} Reason=${flag('partition',false)?'None':'InvalidPartition'}`;
-if(cmd==='scontrol update JobId=1042 PartitionName=gpu')return repair('partition','Training job corrected and resubmitted to gpu partition.');
-}
-if(id==='slurm-gres'){
-if(cmd==='scontrol show node node002')return `NodeName=node002 State=IDLE Gres=gpu:${flag('gres',false)?'8':'0'} AllocTRES=gres/gpu=0`;
-if(cmd==='nvidia-smi')return 'SIMULATED GPU INVENTORY\nGPU 0-7 visible; no hardware errors detected.';
-if(cmd==='sudo systemctl restart slurmd')return repair('gres','Training GRES inventory reconciled. Actual Slurm configuration is not changed.');
-}
-if(id==='slurm-service'){
-if(cmd==='sinfo -R')return flag('slurmd',false)?'No unavailable nodes':'REASON USER NODELIST\nslurmd not responding root node002';
-if(cmd==='sinfo')return `PARTITION AVAIL NODES STATE NODELIST\ngpu up 2 ${flag('slurmd',false)?'idle':'down'} node002`;
-if(cmd==='systemctl status slurmd')return `● slurmd.service - Slurm node daemon\nActive: ${flag('slurmd',false)?'active (running)':'inactive (dead)'}`;
-if(cmd==='journalctl -u slurmd -n 20')return 'Nov 08 slurmd: simulated daemon stopped; no hardware fault reported.';
-if(cmd==='sudo systemctl restart slurmd')return repair('slurmd','Simulated slurmd restarted; node002 returns to IDLE.');
-}
-if(id==='k8s-pending'||id==='k8s-crash'||id==='k8s-gpu'||id==='k8s-node'){
-const key={ 'k8s-pending':'taint','k8s-crash':'env','k8s-gpu':'plugin','k8s-node':'kubelet'}[id],ok=flag(key,false);
-if(cmd==='kubectl get pods')return `NAME READY STATUS RESTARTS\ninference ${ok?'1/1':'0/1'} ${ok?'Running':id==='k8s-crash'?'CrashLoopBackOff':'Pending'} ${id==='k8s-crash'&&!ok?'5':'0'}`;
-if(cmd==='kubectl describe pod inference')return `Name: inference\nStatus: ${ok?'Running':id==='k8s-crash'?'CrashLoopBackOff':'Pending'}\nEvents: ${ok?'Scheduled and healthy':id==='k8s-pending'?'0/2 nodes available: untolerated taint training=blocked:NoSchedule':id==='k8s-crash'?'Back-off restarting failed container':'Insufficient nvidia.com/gpu / node unavailable'}`;
-if(cmd==='kubectl get nodes')return `NAME STATUS ROLES\nnode001 Ready worker\nnode002 ${id==='k8s-node'&&!ok?'NotReady':'Ready'} worker`;
-if(cmd==='kubectl describe node node002')return id==='k8s-pending'?`Name: node002\nTaints: ${ok?'<none>':'training=blocked:NoSchedule'}`:id==='k8s-gpu'?`Name: node002\nAllocatable: nvidia.com/gpu: ${ok?'8':'0'}`:`Name: node002\nConditions: Ready=${ok?'True':'False'} Reason=${ok?'KubeletReady':'KubeletNotReady'}`;
-if(cmd==='kubectl get daemonset -n gpu-operator')return `NAME DESIRED CURRENT READY\nnvidia-device-plugin-daemonset 2 2 ${ok?'2':'0'}`;
-if(cmd==='kubectl logs inference')return id==='k8s-crash'&&!ok?'FATAL: required environment variable MODEL_PATH is missing':ok?'Inference service started':'Container has not started';
-if(cmd==='systemctl status kubelet')return `● kubelet.service\nActive: ${ok?'active (running)':'inactive (dead)'}`;
-if(cmd==='kubectl taint nodes node002 training=blocked:NoSchedule-'&&id==='k8s-pending')return repair(key,'node/node002 untainted; pod scheduled.');
-if(cmd==='kubectl set env deployment/inference MODEL_PATH=/models'&&id==='k8s-crash')return repair(key,'deployment.apps/inference environment updated; pod recovered.');
-if(cmd==='kubectl rollout restart daemonset/nvidia-device-plugin-daemonset -n gpu-operator'&&id==='k8s-gpu')return repair(key,'Training device plugin recovered; GPU allocatable count restored.');
-if(cmd==='sudo systemctl restart kubelet'&&id==='k8s-node')return repair(key,'Simulated kubelet restarted; node Ready.');
-}
-if(id==='bcm-image'||id==='bcm-category'){
-const b=state.bcm.node003;
-if(cmd==='cmsh'||cmd==='device'||cmd==='use node003'||cmd==='list'||cmd==='commit'||cmd.startsWith('set ')||cmd.startsWith('get ')) {
-if(cmd==='get image'&&state.selected==='node003')return `image = ${state.staged.image??b.image??'(unset)'}`;
-if(cmd==='get category'&&state.selected==='node003')return `category = ${state.staged.category??b.category??'(unset)'}`;
-}
-}
-if(id==='gpu-xid'){
-if(cmd==='nvidia-smi')return 'SIMULATED GPU STATUS\nGPU 2: Xid error observed; GPU 0-1,3-7 nominal.';
-if(cmd==='journalctl -k -n 30')return 'NVRM: Xid (PCI:0000:41:00): 79, GPU has fallen off the bus (simulated event).';
-if(cmd==='scontrol update NodeName=node002 State=DRAIN Reason=GPU_Xid')return repair('xidDrain','node002 DRAIN Reason=GPU_Xid. New jobs prevented.');
-if(cmd==='scontrol show node node002')return flag('xidDrain',false)?repair('xidIncident','NodeName=node002 State=DRAIN Reason=GPU_Xid'): 'NodeName=node002 State=IDLE';
-if(cmd==='sinfo -R')return flag('xidDrain',false)?'REASON USER NODELIST\nGPU_Xid trainer node002':'No unavailable nodes';
-}
-if(id==='storage-full'){
-if(cmd==='df -h')return `Filesystem Size Used Avail Use% Mounted on\n/shared 1.0T ${flag('storage',false)?'600G':'1.0T'} ${flag('storage',false)?'400G':'0'} ${flag('storage',false)?'60%':'100%'} /shared`;
-if(cmd==='du -sh /shared/*')return '400G /shared/old-checkpoint.tmp\n600G /shared/datasets';
-if(cmd==='ls -lh /shared/old-checkpoint.tmp')return '-rw-r--r-- trainer trainer 400G old-checkpoint.tmp (disposable training file)';
-if(cmd==='rm /shared/old-checkpoint.tmp')return repair('storage','Verified disposable training checkpoint removed; datasets untouched.');
-}
-return null;
-}
-function checklist(){if(!guide)return '';const g=walkthroughs[guide.id];return `<div class="card lab-checklist"><div class="flex space"><h3>Scenario checklist</h3><span class="tag">${Math.min(guide.at,g.steps.length)}/${g.steps.length} complete</span></div><ol class="checklist">${g.steps.map((step,i)=>`<li class="${(guide.done||[]).includes(i)?'done':i===guide.at?'current':'pending'}"><span class="checkmark">${(guide.done||[]).includes(i)?'✓':i===guide.at?'→':'○'}</span><span><strong>${esc(step[0])}</strong><small>${esc(step[1])}</small></span></li>`).join('')}</ol><p class="muted">Type <code>hint</code> in the terminal to reveal the command for your current step. Hints do not complete checklist items.</p></div>`}
-function terminalHint(){if(!guide)return 'No guided scenario is active. Open Guided Lab Simulator and start a scenario first.';const g=walkthroughs[guide.id],step=g.steps[guide.at];return step?`HINT — Step ${guide.at+1}/${g.steps.length}\nCommand: ${step[2]}\nWhy: ${step[3]}\nType the command above to complete this checklist item.`:'All checklist items are complete. You have recovered the simulated environment.'}
-function stepCard(){if(!guide)return '<p>Select a lab above to begin.</p>';let g=walkthroughs[guide.id],step=g.steps[guide.at],done=!step;return `<div class="card"><span class="tag">GUIDED LAB</span><h2>${esc(g.name)}</h2><p>${esc(g.story)}</p><div class="scenario-brief"><strong>Training incident context</strong><p>Environment: isolated synthetic AI cluster. Start with the described symptom and inspect terminal output to identify the fault. The command sequence is guided; this is not a production cluster.</p><details><summary>Show supported command syntax for this scenario</summary><pre>${esc(g.steps.map(x=>x[2]).join('\n'))}</pre></details><p><a href="https://www.nvidia.com/en-us/learn/certification/ai-operations-professional/" target="_blank" rel="noopener">Official NCP-AIO exam objectives ↗</a></p></div><div class="progress"><div style="width:${guide.at/g.steps.length*100}%"></div></div><p class="muted">${done?'All steps complete':`Step ${guide.at+1} of ${g.steps.length}`}</p>${done?`<h2 class="success">✓ Lab completed!</h2>${button('Restart lab',`startWalkthrough("${guide.id}")`,'primary')}`:`<h3>${esc(step[0])}: ${esc(step[1])}</h3><details><summary>Show command hint and explanation</summary><pre>${esc(step[2])}</pre><p>${esc(step[3])}</p></details><p>Run the command in the terminal. The simulator checks your output and unlocks the next step.</p>${button('Open guided terminal','go("terminal")','primary')}`}</div>`}
+// The NAVIAOps engine executes and grades all labs from synthetic cluster state.
+// Legacy scenario-specific command-matching handlers are intentionally removed.
+function checklist(){if(!guide)return '';const g=walkthroughs[guide.id];return `<div class="card lab-checklist"><div class="flex space"><h3>Scenario checklist</h3><span class="tag">${Math.min(guide.at,g.steps.length)}/${g.steps.length} complete</span></div><ol class="checklist">${g.steps.map((step,i)=>`<li class="${(guide.done||[]).includes(i)?'done':i===guide.at?'current':'pending'}"><span class="checkmark">${(guide.done||[]).includes(i)?'✓':i===guide.at?'→':'○'}</span><span><strong>${esc(step[0])}</strong><small>${esc(step[1])}</small></span></li>`).join('')}</ol><p class="muted">${mock?.phase==='labs'?'Exam: hints are disabled; use terminal diagnostics.':'Guided training: type hint to reveal a suggested command. Hints do not complete checklist items.'}</p></div>`}
+function terminalHint(){if(!guide)return 'No guided scenario is active. Open Guided Lab Simulator and start a scenario first.';const g=walkthroughs[guide.id],step=g.steps.find((_,i)=>!(guide.done||[]).includes(i));return step?`HINT — Step ${guide.at+1}/${g.steps.length}\nCommand: ${step[2]}\nWhy: ${step[3]}\nOther valid commands may also achieve this goal. The final state is what matters.`:'All checklist items are complete. You have recovered the simulated environment.'}
+function stepCard(){if(!guide)return '<p>Select a lab above to begin.</p>';let g=walkthroughs[guide.id],step=g.steps[guide.at],done=!step;return `<div class="card"><span class="tag">GUIDED LAB</span><h2>${esc(g.name)}</h2><p>${esc(g.story)}</p><div class="scenario-brief"><strong>Training incident context</strong><p>Environment: isolated synthetic AI cluster. Start with the described symptom and inspect terminal output to identify the fault. Commands can be executed in any order; the checklist tracks evidence and recovery. This is not a production cluster.</p><details><summary>Guided command suggestions (practice mode only)</summary><pre>${esc(g.steps.map(x=>x[2]).join('\n'))}</pre></details><p><a href="https://www.nvidia.com/en-us/learn/certification/ai-operations-professional/" target="_blank" rel="noopener">Official NCP-AIO exam objectives ↗</a></p></div><div class="progress"><div style="width:${guide.at/g.steps.length*100}%"></div></div><p class="muted">${done?'All steps complete':`Step ${guide.at+1} of ${g.steps.length}`}</p>${done?`<h2 class="success">✓ Lab completed!</h2>${button('Restart lab',`startWalkthrough("${guide.id}")`,'primary')}`:`<h3>${esc(step[0])}: ${esc(step[1])}</h3><details><summary>Show command hint and explanation</summary><pre>${esc(step[2])}</pre><p>${esc(step[3])}</p></details><p>Run the command in the terminal. The simulator grades investigation, real cluster state, and post-repair verification independently of command order.</p>${button('Open guided terminal','go("terminal")','primary')}`}</div>`}
 function faults(){return `<h1>AI Operations Lab Library</h1><p class="sub">15 original guided labs across BCM, Slurm, Kubernetes, GPU diagnostics and Linux. Each has a checklist, terminal hints and verification.</p><div class="grid">${faultTypes.map(([id,title,desc])=>`<div class="card"><span class="tag">${esc(walkthroughs[id]?.domain||(id==='bcm'?'BCM':'Troubleshooting'))}</span><h2>${esc(title)}</h2><p>${esc(desc)}</p>${state.completed.includes(id)?'<span class="tag" style="color:#78e1b0">✓ Completed</span> ':''}${button(state.completed.includes(id)?'Practice again':'Start guided lab',`startWalkthrough("${id}")`,'primary')}</div>`).join('')}</div>${stepCard()}${checklist()}`}
-window.startWalkthrough=id=>{if(mock?.phase==='labs'&&mock.labIds[mock.labIndex]!==id)return;let fresh=initial();state.nodes=fresh.nodes;state.jobs=fresh.jobs;state.pod=fresh.pod;state.bcm=fresh.bcm;state.shell='bash';state.mode='';state.selected='';state.staged={};state.history=[];state.lastGuideFeedback='';state.trainingFlags={};state.imageEvidenceSeen=false;state.fault=id;if(id==='drain'){state.nodes.node002.state='drain';state.nodes.node002.reason='Maintenance'}if(id==='image'){state.pod.image='nvcr.io/nvidia/pytorch:missing';state.pod.status='ImagePullBackOff'}if(id==='bcm-image'){state.bcm.node003.image='broken-image';state.bcm.node003.category='gpu'}if(id==='bcm-category'){state.bcm.node003.image='default-image';state.bcm.node003.category='cpu'}guide={id,at:0,done:[]};save();page='terminal';render()};
+window.startWalkthrough=id=>{
+ if(mock?.phase==='labs'&&mock.labIds[mock.labIndex]!==id)return;
+ if(!NAVIAOps.defs[id])return;
+ const fresh=initial();state.nodes=fresh.nodes;state.jobs=fresh.jobs;state.pod=fresh.pod;state.bcm=fresh.bcm;
+ state.ops=NAVIAOps.create(id);syncClusterSnapshot();state.shell='bash';state.mode='';state.selected='';state.staged={};
+ state.history=[];state.lastGuideFeedback='';state.fault=id;
+ guide={id,at:0,done:[]};save();page='terminal';render();
+};
 function checkGuide(cmd,result){
- if(!guide)return;
- const g=walkthroughs[guide.id];
- if(!Array.isArray(guide.done))guide.done=Array.from({length:guide.at||0},(_,i)=>i);
- const bad=/Unknown|Unsupported|Cannot|Usage:|not implemented|Select a device|not found|error:|failed to|No such/i.test(result);
- if(bad){state.lastGuideFeedback='Command returned an error; review its output.';return}
- let newSteps=[];
- for(let i=0;i<g.steps.length;i++){
-  if(guide.done.includes(i))continue;
-  let matched=cmd===g.steps[i][2];
-  if(guide.id==='image'){
-    if(i===0)matched=/^kubectl get (pods|pod|po)(\s|$)/.test(cmd);
-    if(i===1)matched=/^kubectl (describe pod inference|get (rs|replicasets)(\s|$)|rollout history deployment\/inference)/.test(cmd);
-    if(i===2)matched=/^kubectl (set image deployment\/inference inference=|rollout undo deployment\/inference)/.test(cmd)&&state.pod.status==='Running';
-    if(i===3)matched=/^kubectl (get pods|rollout status deployment\/inference)/.test(cmd)&&state.pod.status==='Running'&&(guide.done||[]).includes(2);
-  }
-  if(!matched)continue;
-  let valid=true;
-  if(guide.id==='drain'&&i===3)valid=state.nodes.node002.state==='idle';
-  if(guide.id==='image'&&i===2)valid=state.pod.status==='Running'&&Boolean(state.imageEvidenceSeen);if(guide.id==='image'&&i===3)valid=state.pod.status==='Running';
-  if(guide.id==='bcm'&&i===g.steps.length-1)valid=state.bcm.node003.category==='gpu'&&state.bcm.node003.image==='default-image';
-  if(guide.id==='bcm-image'&&i===7)valid=state.bcm.node003.image==='default-image';
-  if(guide.id==='bcm-category'&&i===6)valid=state.bcm.node003.category==='gpu';
-  if(guide.id==='gpu-xid'&&i===4)valid=Boolean(state.trainingFlags?.xidDrain&&state.trainingFlags?.xidIncident);
-  if(valid){guide.done.push(i);newSteps.push(i)}
- }
+ if(!guide||!state.ops)return;
+ const before=Array.isArray(guide.done)?guide.done:[];
+ const g=NAVIAOps.grade(state.ops);
+ guide.done=[...(g.investigated?[0]:[]),...(g.repair?[1]:[]),...(g.verify?[2]:[])];
  guide.at=guide.done.length;
- if(newSteps.length){state.lastGuideFeedback='✓ Verified: '+newSteps.map(i=>g.steps[i][0]).join(', ');if(guide.at===g.steps.length){complete(guide.id);state.fault='none'}}
- else state.lastGuideFeedback='Command executed. No new objective verified; inspect output and continue investigating.';
+ if(result.startsWith('Error:'))state.lastGuideFeedback='Command rejected. Read the terminal error and use help or the command academy.';
+ else if(guide.done.length>before.length)state.lastGuideFeedback='✓ Verified: '+guide.done.filter(i=>!before.includes(i)).map(i=>['Investigation','Recovered or safely isolated','Post-change validation'][i]).join(', ');
+ else state.lastGuideFeedback='Command ran against the cluster state. No new goal verified yet.';
+ if(g.passed&&state.fault!=='none'){complete(guide.id);state.fault='none'}
 }
 
 window.inject=id=>window.startWalkthrough(id);
-function legacyExams(){if(!exam)return `<h1>Practice exam center</h1><p class="sub">Starter release: ${questions.length} original questions. The four full 30-question exams are not implemented yet.</p><div class="grid">${[1,2,3,4].map(n=>`<div class="card"><h2>Exam ${n}</h2><p>${n===1?'Available starter set: 12 questions':'Planned: 30 unique questions'}</p>${button(n===1?'Start starter exam':'Coming in next release',`startExam(${n})`,n===1?'primary':'')} </div>`).join('')}</div>`;if(exam.finished){let score=exam.answers.filter((v,i)=>v===questions[i][2]).length;return `<h1>Exam review</h1><div class="card"><div class="metric">${score}/${questions.length}</div><p>${Math.round(score/questions.length*100)}% correct · Practice score only, not an official certification prediction.</p>${questions.map((q,i)=>`<div style="border-top:1px solid #31465f;padding:14px 0"><strong>${i+1}. ${esc(q[0])}</strong><p class="${exam.answers[i]===q[2]?'success':'warning'}">Your answer: ${esc(q[1][exam.answers[i]]??'Unanswered')} · Correct: ${esc(q[1][q[2]])}</p><p>${esc(q[3])}</p></div>`).join('')}${button('Return to exams','endExam()','primary')}</div>`}let i=exam.index,q=questions[i];return `<div class="flex space"><div><h1>Starter practice exam</h1><p class="sub">Question ${i+1} of ${questions.length} · ${esc(q[4])}</p></div>${button('Exit','endExam()')}</div><div class="progress"><div style="width:${i/questions.length*100}%"></div></div><div class="card" style="margin-top:20px"><h2 class="question">${esc(q[0])}</h2>${q[1].map((o,j)=>`<button class="option ${exam.answers[i]===j?'chosen':''}" onclick="answer(${j})">${String.fromCharCode(65+j)}. ${esc(o)}</button>`).join('')}<div class="flex space" style="margin-top:18px">${button('Previous','prevQuestion()')}${button(i===questions.length-1?'Submit exam':'Next question','nextQuestion()','primary')}</div></div>`}
-window.startExam=n=>{if(n!==1)return;exam={index:0,answers:Array(questions.length).fill(null),finished:false};render()};window.answer=j=>{exam.answers[exam.index]=j;render()};window.prevQuestion=()=>{exam.index=Math.max(0,exam.index-1);render()};window.nextQuestion=()=>{if(exam.index<questions.length-1)exam.index++;else exam.finished=true;render()};window.endExam=()=>{exam=null;render()};
-
 // v7 original mock examination. NVIDIA domain weights are official; scoring rules are practice-only.
 const DOMAINS=[['Installation and Deployment',31],['Administration',23],['Workload Management',23],['Troubleshooting and Optimization',23]];
 const QB=[];
@@ -442,7 +357,7 @@ addQ(T,"What should be checked during storage performance diagnosis?","Latency, 
 addQ(T,"Why compare before-and-after metrics during optimization?","Validate that a change improved the intended outcome","Avoid recording changes","Prove all faults are fixed forever","Disable alerts","Measured validation prevents guesswork.");
 addQ(T,"What is a sensible response to an NVLink communication fault?","Collect telemetry and logs before isolation or maintenance","Delete all containers","Change every Slurm account","Ignore errors","Collect evidence before disruptive remediation.");
 
-const mockStore='cf-mock-v9';
+const mockStore='cf-mock-v20';
 function shuffle(a){let r=a.slice();for(let i=r.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[r[i],r[j]]=[r[j],r[i]]}return r}
 // Additional original troubleshooting cases (not copied from an exam).
 addQ(T,'A GPU workload is Pending and kubectl describe pod reports Insufficient nvidia.com/gpu. What should you check next?','Node allocatable GPU resources and device-plugin health','Delete every namespace','Restart all Slurm controllers','Change the image tag without inspecting events','The scheduler needs advertised allocatable GPU resources.');
@@ -455,28 +370,28 @@ addQ(W,'Which command gives detailed state and pending reason for Slurm job 1042
 addQ(A,'What does kubectl rollout status help validate after changing a deployment?','Whether the deployment rollout completes successfully','Slurm GRES autodetection','BCM PXE image integrity','InfiniBand subnet-manager election','Rollout status tracks deployment progress.');
 function buildQuestions(){let selected=[];for(const [domain,n] of [[D,9],[A,7],[W,7],[T,7]]){const bank=shuffle(QB.filter(q=>q.domain===domain));if(bank.length<n)throw Error('Insufficient question bank: '+domain);selected.push(...bank.slice(0,n).map(q=>({...q,choices:shuffle(q.choices.map((value,i)=>({value,correct:i===0}))) })));}return shuffle(selected)}
 function saveMock(){try{localStorage.setItem(mockStore,JSON.stringify(mock))}catch{}}
-try{const saved=JSON.parse(localStorage.getItem(mockStore)||'null');if(saved?.version===9)mock=saved}catch{}
+try{const saved=JSON.parse(localStorage.getItem(mockStore)||'null');if(saved?.version===20)mock=saved}catch{}
 function remaining(){return mock?Math.max(0,7200000-(Date.now()-mock.startedAt)):7200000}
 function clockText(){let s=Math.ceil(remaining()/1000);return `${Math.floor(s/3600)}:${String(Math.floor(s%3600/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`}
 function mockScore(){let domains=DOMAINS.map(([name,weight])=>{let qs=mock.qs.map((q,i)=>({q,a:mock.answers[i]})).filter(x=>x.q.domain===name),correct=qs.filter(x=>x.a!==null&&x.q.choices[x.a]?.correct).length;return {name,weight,correct,total:qs.length,pct:qs.length?100*correct/qs.length:0}});let qPct=domains.reduce((v,d)=>v+d.pct*d.weight/100,0);let labs=mock.labResults.map((x,i)=>{let id=mock.labIds[i],g=walkthroughs[id],count=g.steps.length,earned=x?x.completed.reduce((v,done,j)=>v+(done?Math.max(0,1-(Number(x.hints[j])>=3?1:Number(x.hints[j])===2?0.75:Number(x.hints[j])===1?0.5:0)):0),0):0;return {name:g.name,earned,total:count,pct:100*earned/count,hints:x?.hints.reduce((total,uses)=>total+(Number(uses)||0),0)||0}});let labPct=labs.reduce((v,l)=>v+l.pct,0)/3;return {domains,qPct,labs,labPct,overall:(qPct+labPct)/2}}
-function mockStart(variant=0){if(mock&&mock.phase!=='results'&&!confirm('Replace your current mock exam?'))return;const pool={slurm:['drain','slurm-resources','slurm-partition','slurm-gres','slurm-service'],k8s:['image','k8s-pending','k8s-crash','k8s-gpu','k8s-node'],bcm:['bcm','bcm-image','bcm-category']};let labIds=shuffle([shuffle(pool.slurm)[0],shuffle(pool.k8s)[0],shuffle(pool.bcm)[0]]);mock={version:9,variant,startedAt:Date.now(),phase:'questions',qs:buildQuestions(),answers:Array(30).fill(null),qIndex:0,labIds,labIndex:0,labResults:[null,null,null]};guide=null;saveMock();page='exams';render()}
+function mockStart(variant=0){if(mock&&mock.phase!=='results'&&!confirm('Replace your current mock exam?'))return;const pool={slurm:['drain','slurm-resources','slurm-partition','slurm-gres','slurm-service'],k8s:['image','k8s-pending','k8s-crash','k8s-gpu','k8s-node'],bcm:['bcm','bcm-image','bcm-category']};let labIds=shuffle([shuffle(pool.slurm)[0],shuffle(pool.k8s)[0],shuffle(pool.bcm)[0]]);mock={version:20,variant,startedAt:Date.now(),phase:'questions',qs:buildQuestions(),answers:Array(30).fill(null),qIndex:0,labIds,labIndex:0,labResults:[null,null,null]};guide=null;saveMock();page='exams';render()}
 window.startMock=mockStart;
 window.mockAnswer=i=>{if(mock?.phase!=='questions')return;mock.answers[mock.qIndex]=i;saveMock();render()};
 window.mockNav=delta=>{if(mock?.phase!=='questions')return;mock.qIndex=Math.max(0,Math.min(29,mock.qIndex+delta));saveMock();render()};
 window.mockToLabs=()=>{if(mock?.phase!=='questions')return;if(mock.answers.some(a=>a===null)&&!confirm('Some questions are unanswered. Continue to labs?'))return;mock.phase='labs';startMockLab();};
 function startMockLab(){if(!mock||mock.phase!=='labs')return;window.startWalkthrough(mock.labIds[mock.labIndex]);mock.labResults[mock.labIndex]={completed:Array(walkthroughs[guide.id].steps.length).fill(false),hints:Array(walkthroughs[guide.id].steps.length).fill(0)};page='exams';saveMock();render()}
-function syncMockLab(){if(mock?.phase!=='labs'||!guide)return;let r=mock.labResults[mock.labIndex];for(let i of (guide.done||[]))r.completed[i]=true;saveMock()}
+function syncMockLab(){if(mock?.phase!=='labs'||!guide)return;let r=mock.labResults[mock.labIndex];for(let i=0;i<r.completed.length;i++)r.completed[i]=(guide.done||[]).includes(i);saveMock()}
 function mockHintUsed(){if(mock?.phase!=='labs'||!guide)return;let r=mock.labResults[mock.labIndex];if(guide.at<r.hints.length)r.hints[guide.at]=Math.min(3,(Number(r.hints[guide.at])||0)+1);saveMock()}
 window.submitMockLab=()=>{if(mock?.phase!=='labs')return;syncMockLab();if(guide&&guide.at<walkthroughs[guide.id].steps.length&&!confirm('Submit this lab with unfinished checklist items?'))return;mock.labIndex++;guide=null;if(mock.labIndex>=3)finishMock();else startMockLab();saveMock();render()};
 function finishMock(){if(mock.phase==='results')return;mock.phase='results';mock.finishedAt=Date.now();guide=null;saveMock();const r=mockScore();const record={id:'exam-'+mock.startedAt,startedAt:new Date(mock.startedAt).toISOString(),finishedAt:new Date(mock.finishedAt).toISOString(),overall:r.overall,questionPct:r.qPct,labPct:r.labPct,passed:r.overall>=70,domains:r.domains,labs:r.labs,questionCount:30,labIds:mock.labIds};if(!examHistory.some(x=>x.id===record.id)){examHistory.unshift(record);persistExamHistory();window.CFCloud?.saveExam?.(record)}}
 window.finishMockEarly=()=>{if(!mock||mock.phase==='results')return;if(!confirm('Finish the mock exam now? Unanswered questions and unfinished labs score zero.'))return;if(mock.phase==='labs')syncMockLab();finishMock();page='exams';render()};
 window.clearMock=()=>{if(mock?.phase!=='results'&&!confirm('Discard the current mock exam?'))return;mock=null;guide=null;saveMock();render()};
-function exams(){if(!mock)return `<div class="mock-hero"><span class="tag">NCP-AIO PRACTICE SIMULATOR</span><h1>Full mock examination</h1><p>30 randomized questions and 3 randomized hands-on labs · 120-minute shared timer · simulated grading</p><div class="grid"><div class="card"><h2>Questions · 50%</h2><p>9 Installation & Deployment, 7 Administration, 7 Workload Management, 7 Troubleshooting & Optimization. Weighted to the published 31/23/23/23 blueprint.</p></div><div class="card"><h2>Labs · 50%</h2><p>One random Slurm, Kubernetes and BCM lab. Checklist items earn credit. The first hint on a step forfeits 50% of its credit; the second brings the total loss to 75%; the third forfeits 100%.</p></div><div class="card"><h2>Pass benchmark</h2><p>70% combined practice score. This is a custom training threshold, not an NVIDIA-published cut score.</p></div></div><div class="grid">${[0,1,2,3].map(i=>`<div class="card"><h3>Mock exam ${i+1}</h3><p>New randomized question and lab selection.</p>${button('Start mock '+(i+1),`startMock(${i})`,'primary')}</div>`).join('')}</div><div class="card"><h2>Saved exam history</h2>${examHistory.length?`<div style="overflow:auto"><table class="mock-table"><thead><tr><th>Date</th><th>Overall</th><th>Questions</th><th>Labs</th><th>Result</th></tr></thead><tbody>${examHistory.map(x=>`<tr><td>${esc(new Date(x.finishedAt).toLocaleDateString())}</td><td>${Number(x.overall).toFixed(1)}%</td><td>${Number(x.questionPct).toFixed(1)}%</td><td>${Number(x.labPct).toFixed(1)}%</td><td>${x.passed?'PASS':'RETRY'}</td></tr>`).join('')}</tbody></table></div>`:'<p>No completed mock exams yet.</p>'}<p class="muted">${window.CFCloud?.user?'Signed in: cloud sync enabled':'Guest mode: results saved on this device only. Sign in with Google to sync.'}</p></div><p class="muted">${QB.length} original questions in the bank · ${Object.keys(walkthroughs).length} lab scenarios · your attempt is saved locally in this browser.</p></div>`;
+function exams(){if(!mock)return `<div class="mock-hero"><span class="tag">NCP-AIO PRACTICE SIMULATOR</span><h1>Full mock examination</h1><p>30 randomized questions and 3 randomized hands-on labs · 120-minute shared timer · simulated grading</p><div class="grid"><div class="card"><h2>Questions · 50%</h2><p>9 Installation & Deployment, 7 Administration, 7 Workload Management, 7 Troubleshooting & Optimization. Weighted to the published 31/23/23/23 blueprint.</p></div><div class="card"><h2>Labs · 50%</h2><p>One random Slurm, Kubernetes and BCM lab. Evidence, repaired cluster state, and post-repair verification determine lab credit. Hints are disabled in timed exam labs.</p></div><div class="card"><h2>Pass benchmark</h2><p>70% combined practice score. This is a custom training threshold, not an NVIDIA-published cut score.</p></div></div><div class="grid">${[0,1,2,3].map(i=>`<div class="card"><h3>Mock exam ${i+1}</h3><p>New randomized question and lab selection.</p>${button('Start mock '+(i+1),`startMock(${i})`,'primary')}</div>`).join('')}</div><div class="card"><h2>Saved exam history</h2>${examHistory.length?`<div style="overflow:auto"><table class="mock-table"><thead><tr><th>Date</th><th>Overall</th><th>Questions</th><th>Labs</th><th>Result</th></tr></thead><tbody>${examHistory.map(x=>`<tr><td>${esc(new Date(x.finishedAt).toLocaleDateString())}</td><td>${Number(x.overall).toFixed(1)}%</td><td>${Number(x.questionPct).toFixed(1)}%</td><td>${Number(x.labPct).toFixed(1)}%</td><td>${x.passed?'PASS':'RETRY'}</td></tr>`).join('')}</tbody></table></div>`:'<p>No completed mock exams yet.</p>'}<p class="muted">${window.CFCloud?.user?'Signed in: cloud sync enabled':'Guest mode: results saved on this device only. Sign in with Google to sync.'}</p></div><p class="muted">${QB.length} original questions in the bank · ${Object.keys(walkthroughs).length} lab scenarios · your attempt is saved locally in this browser.</p></div>`;
 if(mock.phase!=='results'&&remaining()<=0){if(mock.phase==='labs')syncMockLab();finishMock()}
 if(mock.phase==='results'){let r=mockScore();return `<h1>Mock exam results</h1><p class="sub">Tyler's NCP-AIO practice assessment · NVIDIA does not publish this 70% cut score or hint deductions.</p><div class="grid"><div class="card"><div class="muted">Overall</div><div class="metric">${r.overall.toFixed(1)}%</div><h2 class="${r.overall>=70?'success':'warning'}">${r.overall>=70?'PASS':'NOT YET PASSING'}</h2></div><div class="card"><div class="muted">Questions · 50% contribution</div><div class="metric">${r.qPct.toFixed(1)}%</div><p>${(r.qPct/2).toFixed(1)} of 50 overall points</p></div><div class="card"><div class="muted">Labs · 50% contribution</div><div class="metric">${r.labPct.toFixed(1)}%</div><p>${(r.labPct/2).toFixed(1)} of 50 overall points</p></div></div><div class="card"><h2>Question domains</h2><table class="mock-table"><thead><tr><th>Domain</th><th>Weight</th><th>Correct</th><th>Accuracy</th><th>Weighted points</th></tr></thead><tbody>${r.domains.map(d=>`<tr><td>${esc(d.name)}</td><td>${d.weight}%</td><td>${d.correct}/${d.total}</td><td>${d.pct.toFixed(1)}%</td><td>${(d.pct*d.weight/100).toFixed(1)}</td></tr>`).join('')}</tbody></table></div><div class="card"><h2>Hands-on lab scoring</h2><table class="mock-table"><thead><tr><th>Lab</th><th>Steps earned</th><th>Hints</th><th>Lab score</th></tr></thead><tbody>${r.labs.map(l=>`<tr><td>${esc(l.name)}</td><td>${l.earned.toFixed(1)}/${l.total}</td><td>${l.hints}</td><td>${l.pct.toFixed(1)}%</td></tr>`).join('')}</tbody></table><p class="muted">Each lab contributes one-third of the lab section. Each step loses 50% credit after one hint, 75% after two, or 100% after three. Unfinished steps earn zero.</p></div><details class="card"><summary>Review all 30 question answers and explanations</summary>${mock.qs.map((q,i)=>`<div class="mock-review"><strong>${i+1}. ${esc(q.stem)}</strong><p class="${mock.answers[i]!==null&&q.choices[mock.answers[i]]?.correct?'success':'warning'}">Your answer: ${esc(mock.answers[i]===null?'Unanswered':q.choices[mock.answers[i]].value)} · Correct: ${esc(q.choices.find(c=>c.correct).value)}</p><p>${esc(q.explain)}</p></div>`).join('')}</details>${button('Start another randomized mock','startMock()','primary')} ${button('Close results','clearMock()')} ${button('View saved history','clearMock()')}`}
 let top=`<div class="mock-top"><div><strong>Mock exam</strong><span>${mock.phase==='questions'?'Questions · 50%':'Hands-on labs · 50%'}</span></div><div class="mock-timer" id="mock-clock">${clockText()}</div>${button('Finish early','finishMockEarly()','tiny')}</div>`;
 if(mock.phase==='questions'){let i=mock.qIndex,q=mock.qs[i],answered=mock.answers.filter(x=>x!==null).length;return `${top}<div class="mock-question"><div class="flex space"><div><span class="tag">${esc(q.domain)}</span><p>Question ${i+1} of 30 · ${answered} answered</p></div><div class="mock-jump"><label for="mock-jump">Go to</label><select id="mock-jump" onchange="mockJump(this.value)">${mock.qs.map((_,j)=>`<option value="${j}" ${i===j?'selected':''}>${j+1}${mock.answers[j]!==null?' ✓':''}</option>`).join('')}</select></div></div><div class="progress"><div style="width:${answered/30*100}%"></div></div><h2>${esc(q.stem)}</h2>${q.choices.map((c,j)=>`<button class="option ${mock.answers[i]===j?'chosen':''}" onclick="mockAnswer(${j})">${String.fromCharCode(65+j)}. ${esc(c.value)}</button>`).join('')}<div class="flex space">${button('← Previous','mockNav(-1)')}${i===29?button('Continue to labs','mockToLabs()','primary'):button('Next →','mockNav(1)','primary')}</div>${i!==29?button('Skip to labs when ready','mockToLabs()','tiny'):''}</div>`}
-return `${top}<div class="mock-lab-heading"><span class="tag">Lab ${mock.labIndex+1} of 3</span><strong>${esc(walkthroughs[mock.labIds[mock.labIndex]].name)}</strong><span>Hint penalties: 1st −50%, 2nd −75% total, 3rd −100%</span></div>${terminal()}`}
+return `${top}<div class="mock-lab-heading"><span class="tag">Lab ${mock.labIndex+1} of 3</span><strong>${esc(walkthroughs[mock.labIds[mock.labIndex]].name)}</strong><span>No hints available in exam labs</span></div>${terminal()}`}
 window.mockJump=n=>{if(mock?.phase==='questions'){mock.qIndex=Number(n);saveMock();render()}};
 window.addEventListener('pagehide',saveMock);
 setInterval(()=>{if(!mock||mock.phase==='results')return;let el=document.getElementById('mock-clock');if(el)el.textContent=clockText();if(remaining()<=0){if(mock.phase==='labs')syncMockLab();finishMock();if(page==='exams')render()}},1000);

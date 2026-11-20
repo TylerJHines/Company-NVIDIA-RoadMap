@@ -1,6 +1,6 @@
 {
-  "name": "Tyler's NCP-AIO Practice Sim and Mock Exam",
-  "short_name": "Tyler's NCP-AIO",
+  "name": "NAVIA · AI Operations Lab Simulator",
+  "short_name": "NAVIA · AIO",
   "description": "NCP-AIO practice simulator and mock exam",
   "start_url": "./index.html",
   "scope": "./",
